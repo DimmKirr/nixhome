@@ -1,0 +1,55 @@
+---
+services:
+  devbox:
+    build:
+      context: ../..  # nixhome repo root
+      dockerfile: hosts/devbox/Dockerfile
+      args:
+        USER_NAME: dmitry
+        USER_UID: 501
+        USER_GID: 20
+
+    working_dir: /${APP_NAME:-app}
+    container_name: devbox-${APP_NAME:-app}
+
+    # Add root group for Docker socket access
+    group_add:
+      - "0"
+
+    volumes:
+      # Working directory
+      - ${BASE_DIR:-/tmp}:/${APP_NAME:-app}
+
+      # Docker socket
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Git config
+      - ${HOME}/.config/git/:/home/dmitry/.config/git/:ro
+
+      # Claude
+      - ${HOME}/.claude.json:/home/dmitry/.claude.json
+      - ${HOME}/.claude/:/home/dmitry/.claude/
+
+      # Terraform
+      - ${HOME}/.terraform.d/plugins:/home/dmitry/.terraform.d/plugins
+      - ${HOME}/.terraformrc:/home/dmitry/.terraformrc:ro
+
+    environment:
+      APP_NAME: ${APP_NAME:-app}
+      WORKSPACE: /${APP_NAME:-app}
+      GIT_AUTHOR_NAME: "Dmitry Kireev"
+      GIT_AUTHOR_EMAIL: "dmitry@hazelops.com"
+      GIT_COMMITTER_NAME: "Dmitry Kireev"
+      GIT_COMMITTER_EMAIL: "dmitry@hazelops.com"
+      TF_CLI_CONFIG_FILE: /home/dmitry/.terraformrc
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TERM: ${TERM:-xterm-256color}
+
+    command: tail -f /dev/null
+    networks:
+      - devbox-network
+
+networks:
+  devbox-network:
+    driver: bridge

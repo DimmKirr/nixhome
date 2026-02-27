@@ -398,19 +398,120 @@ cleandocker() {
 }
 
 
+function _tmuxsave_inject_cell_ids() {
+  local session="$1"
+  local yaml="$HOME/.config/tmuxp/$session.yaml"
+
+  [[ ! -f "$yaml" ]] && return
+
+  local window_count wi
+  window_count=$(yq '.windows | length' "$yaml")
+
+  for ((wi=0; wi<window_count; wi++)); do
+    local window_name
+    window_name=$(yq ".windows[$wi].window_name" "$yaml")
+
+    local pane_ids=()
+    pane_ids=(${(f)"$(tmux list-panes -t "${session}:${window_name}" -F '#{pane_id}' 2>/dev/null | sed 's/^%//')"})
+    [[ ${#pane_ids} -eq 0 ]] && continue
+
+    local pane_count pi
+    pane_count=$(yq ".windows[$wi].panes | length" "$yaml")
+
+    for ((pi=0; pi<pane_count && pi<${#pane_ids}; pi++)); do
+      local pane_id="${pane_ids[$((pi+1))]}"  # zsh arrays are 1-indexed
+      local pane_tag
+      pane_tag=$(yq ".windows[$wi].panes[$pi] | tag" "$yaml")
+
+      if [[ "$pane_tag" == "!!str" ]]; then
+        local shell_cmd
+        shell_cmd=$(yq ".windows[$wi].panes[$pi]" "$yaml")
+        SHELL_CMD="$shell_cmd" PANE_ID="$pane_id" \
+          yq -i ".windows[$wi].panes[$pi] = {\"shell_command\": strenv(SHELL_CMD), \"environment\": {\"CELL_ID\": strenv(PANE_ID)}}" "$yaml"
+      else
+        local existing
+        existing=$(yq ".windows[$wi].panes[$pi].environment.CELL_ID" "$yaml")
+        if [[ "$existing" == "null" ]]; then
+          PANE_ID="$pane_id" yq -i ".windows[$wi].panes[$pi].environment.CELL_ID = strenv(PANE_ID)" "$yaml"
+        fi
+      fi
+    done
+  done
+}
+
+function _tmuxsave_backup() {
+  local session="$1"
+  local src="$HOME/.config/tmuxp/$session.yaml"
+  local backup_base="$HOME/.config/tmuxp/backups"
+  local now
+  now=$(date '+%Y-%m-%dT%H-%M-%S')
+
+  [[ ! -f "$src" ]] && return
+
+  python3 - "$session" "$src" "$backup_base" "$now" << 'EOF'
+import sys, shutil
+from datetime import datetime
+from pathlib import Path
+
+session, src, backup_base, now_str = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+now = datetime.strptime(now_str, '%Y-%m-%dT%H-%M-%S')
+
+for tier in ['recent', 'daily', 'weekly', 'monthly']:
+    Path(f'{backup_base}/{tier}').mkdir(parents=True, exist_ok=True)
+
+filename = f'{session}-{now_str}.yaml'
+
+def get_period(dt, tier):
+    if tier == 'daily':   return dt.strftime('%Y-%m-%d')
+    if tier == 'weekly':  return dt.strftime('%G-W%V')
+    if tier == 'monthly': return dt.strftime('%Y-%m')
+    return None
+
+def parse_dt(f):
+    stem = f.stem
+    prefix = f'{session}-'
+    if not stem.startswith(prefix):
+        return None
+    try:
+        return datetime.strptime(stem[len(prefix):], '%Y-%m-%dT%H-%M-%S')
+    except Exception:
+        return None
+
+limits = {'recent': 7, 'daily': 7, 'weekly': 4, 'monthly': 12}
+
+for tier, limit in limits.items():
+    tier_dir = Path(f'{backup_base}/{tier}')
+    # For tiered saves: remove existing files from same period (keep only latest per period)
+    if tier != 'recent':
+        current_period = get_period(now, tier)
+        for f in tier_dir.glob(f'{session}-*.yaml'):
+            dt = parse_dt(f)
+            if dt and get_period(dt, tier) == current_period:
+                f.unlink()
+    # Copy current save into this tier
+    shutil.copy2(src, tier_dir / filename)
+    # Rotate: drop oldest beyond limit
+    files = sorted(tier_dir.glob(f'{session}-*.yaml'))
+    for f in files[:-limit]:
+        f.unlink()
+
+pass
+EOF
+}
+
 function tmuxsave() {
   local session_list
 
   if [[ -n "$TMUX_SESSION_NAME" ]]; then
-    # Save only the current session
     session_list=("$TMUX_SESSION_NAME")
   else
-    # Read session names from existing .yaml files in tmuxp config
     session_list=(${(f)"$(ls ~/.config/tmuxp/*.yaml 2>/dev/null | xargs -n1 basename | sed 's/\.yaml$//')"})
   fi
 
   for item in "${session_list[@]}"; do
-    tmuxp freeze "$item" -y -q --force -o "~/.config/tmuxp/$item.yaml";
+    tmuxp freeze "$item" -y -q --force -o "~/.config/tmuxp/$item.yaml" &>/dev/null
+    _tmuxsave_inject_cell_ids "$item" &>/dev/null
+    _tmuxsave_backup "$item" && echo "[OK] $item.yaml"
   done
 }
 

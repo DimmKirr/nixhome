@@ -19,6 +19,9 @@
       # See: https://github.com/NixOS/nix/issues/14716
       defaultRefFormat = "files";
     };
+    pull = {
+      rebase = false;
+    };
   };
 
   ignores = [

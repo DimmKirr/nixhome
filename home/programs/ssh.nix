@@ -8,7 +8,8 @@
     "*" = {
       extraOptions = {
         # Use internal FIDO2 provider for security keys
-        "SecurityKeyProvider" = "internal";
+        # Disabled: IntelliJ prompts for it too often, 1Password handles auth instead
+        # "SecurityKeyProvider" = "internal";
         # Use 1Password SSH agent (serves keys from vault + hardware keys)
         "IdentityAgent" = ''"~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"'';
       };

@@ -90,7 +90,11 @@ let
     terraform-docs
 
     yamllint
+    yq-go
     nmap
+    netcat-gnu
+    gitleaks
+    pre-commit
 
     # Yubikey support
     libfido2
@@ -113,6 +117,7 @@ let
     cmake
     gnumake
     ijhttp
+    hurl
     fswatch
     home-assistant-cli
     shfmt
@@ -154,6 +159,7 @@ let
     opencode
 
     google-cloud-sdk  # gcloud CLI including gcloud run
+    google-cloud-sql-proxy
 
 #    codex # using brew for now as nix version needs an overlay for a newer version
     #lmstudio using native macos install for now.

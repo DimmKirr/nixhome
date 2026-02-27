@@ -14,6 +14,7 @@ with pkgs; [
   # xquartz  # Using homebrew cask instead - nix build fails on 25.11
   # karabiner-elements  # Using homebrew - nix can't register app bundles with macOS properly
 
+  keepassxc
   discord      # x86_64 only, doesn't work on aarch64-linux
 ] ++ (with pkgsUnstable; [
   monitorcontrol

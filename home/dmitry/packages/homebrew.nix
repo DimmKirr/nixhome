@@ -45,7 +45,7 @@
     "plex"
     "vlc"
     "mqttx"
-    "anydesk"
+    # "anydesk" # pinned — upgrade needs newer macOS # TODO: review if pin is still required
     "linear-linear"
     "windsurf"
     "goodsync"
@@ -81,19 +81,19 @@
     "timedog"
     "mint"
     "getwindowid"
+    "tiger-vnc" # broken on darwin in nixpkgs, using homebrew instead
   ];
 
   masApps = {
-    "Slack" = 803453959;
-    "Telegram" = 747648890;
-    "Yubikey Authenticator" = 1497506650;
-    "1Password Safari" = 1569813296;
+    # "Slack" = 803453959; # pinned — mas 6.x removed 'get' command, install manually via App Store
+    # "Telegram" = 747648890; # pinned — mas upgrade fails, App Store version is current # TODO: review if pin is still required
+    # "Yubikey Authenticator" = 1497506650; # pinned at 7.3.0 — mas tries to upgrade to 7.3.2 which isn't available yet # TODO: review if pin is still required
+#    "1Password Safari" = 1569813296; # Pinned
     "WireGuard" = 1451685025;
     "DigiDoc4 Client" = 1370791134;
     "Safari WebID" = 1576665083;
     "Canva" = 897446215;
-    "Tailscale" = 1475387142;
-    "Trello" = 1278508951;
+#    "Tailscale" = 1475387142; # commented due to failed update/upgrade. Next time try nixpkgs darwin version again
     "Final Cut Pro" = 424389933;
   };
 }

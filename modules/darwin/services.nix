@@ -1,21 +1,24 @@
-{ ... }: {
+{ pkgsEdge, ... }: {
+  imports = [
+    ./services/ollama.nix
+  ];
+
   services = {
-    # Enable and configure Ollama service
-    /*ollama = {
+    ollama = {
       enable = true;
+      package = pkgsEdge.ollama;  # edge (nixpkgs master) for latest version
+      # host = "0.0.0.0";  # to expose on all interfaces
+      # models = "/path/to/models";
+      environmentVariables = {
+        OLLAMA_NUM_CTX = "32768";            # default context window for all models
+        OLLAMA_KEEP_ALIVE = "1h";            # keep models loaded longer, avoid cold starts
+        OLLAMA_FLASH_ATTENTION = "1";        # flash attention on Metal — faster, less memory
+        OLLAMA_KV_CACHE_TYPE = "q8_0";       # ~50% context memory savings, negligible quality loss
+        OLLAMA_NUM_PARALLEL = "4";           # concurrent requests (48GB has headroom)
+        OLLAMA_MAX_LOADED_MODELS = "2";      # keep 2 models loaded simultaneously
+      };
+    };
 
-      # Optional configurations (uncomment and modify as needed):
-      # package = pkgs.ollama;  # Use a specific Ollama package
-      # host = "127.0.0.1";     # Change to "0.0.0.0" to listen on all interfaces
-      # port = 11434;           # Custom port
-      # models = "/path/to/models";  # Custom models directory
-      # environmentVariables = {
-      #   OLLAMA_LLM_LIBRARY = "cpu";  # Example: Force CPU mode
-      #   OLLAMA_KEEP_ALIVE = "5m";    # Example: Set keep-alive timeout
-      # };
-    };*/
-
-    # Other services can be added here
     # tailscale.enable = true;
   };
 }

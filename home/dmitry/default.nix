@@ -4,7 +4,6 @@
   pkgsUnstable,
   pkgsEdge,
   nixvim,
-  asdf,
   lib,
   ...
 }: {
@@ -13,6 +12,7 @@
   home = {
     sessionVariables = {
       TZ = "UTC";
+      DEVCELL_NIXHOME_PATH = "/Users/dmitry/dev/dimmkirr/devcell/nixhome";
       PYTHONPATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/yt-dl-plugins"
         "$PYTHONPATH"
@@ -29,7 +29,7 @@
         "$HOME/dev/dimmkirr/atun/bin"
         "/run/current-system/sw/bin"
         "/nix/var/nix/profiles/default/bin"
-        "$HOME/.asdf/shims"
+        "$HOME/.local/share/mise/shims"
         "$HOME/.nix-profile/sbin"
         "$HOME/.nix-profile/bin"
         "$HOME/.cargo/bin"
@@ -72,7 +72,7 @@
     nixvim = import ../programs/nixvim.nix {inherit pkgs;};
     zoxide = import ../programs/zoxide.nix {inherit pkgs;};
     poetry = import ../programs/poetry.nix {inherit pkgs;};
-    asdf = import ../programs/asdf.nix {inherit pkgs;};
+    mise = import ../programs/mise.nix {inherit pkgs pkgsEdge;};
     ssh = import ../programs/ssh.nix {inherit pkgs;};
     k9s = import ../programs/k9s.nix {inherit pkgsUnstable;};
 

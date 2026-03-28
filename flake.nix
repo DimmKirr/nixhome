@@ -12,10 +12,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+
     home-manager = {
       url = "github:nix-community/home-manager/release-25.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
 
     #    _1password-shell-plugins.url = "github:1Password/shell-plugins";
     #    mac-app-util.url = "github:hraban/mac-app-util"; # Fixes home-manager symlinked apps
@@ -28,15 +30,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    asdf = {
-      url = "/Users/dmitry/dev/dimmkirr/nix-asdf";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     claude-code = {
       url = "github:roman/claude-code.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
   };
 
   outputs =
@@ -49,7 +47,6 @@
       nixpkgs-edge,
       #      mac-app-util,
       nixvim,
-      asdf,
       ...
     }:
     {
@@ -70,13 +67,8 @@
               home-manager = {
                 # Include the home-manager module
                 users.dmitry = import ./home/dmitry/default.nix;
-                sharedModules = [
-                  asdf.homeManagerModules.default
-                ];
                 extraSpecialArgs = {
                   inherit nixvim;
-                  inherit asdf;
-
                   pkgsUnstable = import inputs.nixpkgs-unstable {
                     system = "x86_64-linux";
                     config = {
@@ -135,14 +127,10 @@
                 # include the home-manager module
                 users.dmitry = import ./home/dmitry/default.nix;
                 sharedModules = [
-                  asdf.homeManagerModules.default
-#                  asdf.homeManagerModules.default
                   #                  mac-app-util.homeManagerModules.default # disabled trampolines for now.
                 ];
                 extraSpecialArgs = {
                   inherit nixvim;
-                  inherit asdf;
-
                   # TODO refactor to have packages config in one place for both stable and unstable
                   pkgsUnstable = import inputs.nixpkgs-unstable {
                     system = "aarch64-darwin";
@@ -196,7 +184,6 @@
           modules = [ ./hosts/devbox/default.nix ];
           extraSpecialArgs = {
             inherit nixvim;
-
             pkgsUnstable = import inputs.nixpkgs-unstable {
               system = "aarch64-linux";
               config = {

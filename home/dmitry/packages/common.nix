@@ -57,6 +57,9 @@ let
     inetutils
     nixfmt-rfc-style
 
+    # Java
+    openjdk
+
     # Go
     go
     cobra-cli
@@ -69,7 +72,9 @@ let
     kubepug
     kube-capacity
 
+    qemu
     spice
+    freerdp
     virt-viewer
 
     vscode

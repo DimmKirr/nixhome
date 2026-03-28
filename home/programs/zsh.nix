@@ -24,7 +24,7 @@
     darwin-rebuild-build = "darwin-rebuild build --flake ~/dev/n0mad/nixhome/";
 
     nix-update-switch = "sudo $(which nix) flake update --impure --flake ~/dev/n0mad/nixhome/ && sudo $(which nix) run nix-darwin --impure -- switch --impure --flake ~/dev/n0mad/nixhome/ && source ~/.zshrc";
-    nix-update-switch-gc = "sudo $(which nix) flake update --impure --flake ~/dev/n0mad/nixhome/ && sudo $(which nix) run nix-darwin --impure -- switch --impure --flake ~/dev/n0mad/nixhome/ && source ~/.zshrc && asdf reshim";
+    nix-update-switch-gc = "sudo $(which nix) flake update --impure --flake ~/dev/n0mad/nixhome/ && sudo $(which nix) run nix-darwin --impure -- switch --impure --flake ~/dev/n0mad/nixhome/ && source ~/.zshrc";
     nix-switch = "sudo darwin-rebuild switch --flake ~/dev/n0mad/nixhome/ --offline && source ~/.zshrc";
 
     update-nix = "sudo $(which nix) flake update --impure --flake ~/dev/n0mad/nixhome/ && sudo $(which nix) run nix-darwin --impure -- switch --impure --flake ~/dev/n0mad/nixhome/ && source ~/.zshrc";
@@ -58,10 +58,6 @@
   #  };
 
   plugins = [
-    {
-      name = "asdf";
-      src = pkgs.asdf;
-    }
     {
       name = "zsh-users/zsh-autosuggestions";
       src = pkgs.zsh-autosuggestions;

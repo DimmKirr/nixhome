@@ -21,6 +21,7 @@
     };
     pull = {
       rebase = false;
+      ff = true;
     };
   };
 
@@ -39,8 +40,10 @@
     ".jira"
     ".claude"
     ".context"
+    ".devcell"
     "CLAUDE.md"
     ".worktrees"
     ".env"
+    ".playwright-mcp"
   ];
 }

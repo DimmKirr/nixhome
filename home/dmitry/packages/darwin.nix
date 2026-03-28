@@ -6,7 +6,7 @@
   ...
 }:
 with pkgs; [
-  mas
+  # mas # managed by homebrew (nix-darwin auto-installs via brew when masApps is non-empty)
   defaultbrowser
   raycast
   ext4fuse

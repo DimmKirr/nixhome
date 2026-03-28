@@ -76,32 +76,30 @@
         ];
       };
       langchain = {
-              api_url = "http://127.0.0.1:1234";
-              available_models = [
-                {
-                  name = "gpt-oss-20b";
-                  display_name = "OpenAI GPT OSS 20B";
-                  max_tokens = 32768;
-                  supports_tools = true;
-                  supports_thinking = true;
-                  supports_images = true;
-                  capabilities = {
-                    edit = true; # Enable code editing capabilities
-                    chat = true; # Enable chat functionality
-                    search = true; # Enable web search capabilities
-                  };
-                  parameters = {
-                    temperature = 0.7; # Control creativity vs. determinism (0.0 to 1.0)
-                    top_p = 0.9; # Nucleus sampling parameter
-                    frequency_penalty = 0.0;
-                    presence_penalty = 0.0;
-                  };
-                }
-              ];
+        api_url = "http://127.0.0.1:1234";
+        available_models = [
+          {
+            name = "gpt-oss-20b";
+            display_name = "OpenAI GPT OSS 20B";
+            max_tokens = 32768;
+            supports_tools = true;
+            supports_thinking = true;
+            supports_images = true;
+            capabilities = {
+              edit = true; # Enable code editing capabilities
+              chat = true; # Enable chat functionality
+              search = true; # Enable web search capabilities
             };
+            parameters = {
+              temperature = 0.7; # Control creativity vs. determinism (0.0 to 1.0)
+              top_p = 0.9; # Nucleus sampling parameter
+              frequency_penalty = 0.0;
+              presence_penalty = 0.0;
+            };
+          }
+        ];
+      };
     };
-
-
 
     # Keybindings for agentic editing
     keymap = {

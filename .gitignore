@@ -8,3 +8,4 @@ result-*
 # Local overrides (not committed)
 local.nix
 *-local.nix
+.devcell.toml

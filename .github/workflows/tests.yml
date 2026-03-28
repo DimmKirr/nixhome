@@ -70,31 +70,27 @@ jobs:
 
       - name: Check flake
         run: |
-          nix flake check --no-build \
-            --override-input asdf github:asdf-vm/asdf/master
+          nix flake check --no-build
 
       - name: Build darwinConfigurations.automationd (dry-run)
         if: matrix.config == 'automationd'
         run: |
           nix build .#darwinConfigurations.automationd.system \
             --dry-run \
-            --show-trace \
-            --override-input asdf github:asdf-vm/asdf/master
+            --show-trace
 
       - name: Build nixosConfigurations.jump (dry-run)
         if: matrix.config == 'jump'
         run: |
           nix build .#nixosConfigurations.jump.config.system.build.toplevel \
             --dry-run \
-            --show-trace \
-            --override-input asdf github:asdf-vm/asdf/master
+            --show-trace
 
       - name: Build homeConfigurations.devbox
         if: matrix.config == 'devbox'
         run: |
           nix build .#homeConfigurations.devbox.activationPackage \
-            --show-trace \
-            --override-input asdf github:asdf-vm/asdf/master
+            --show-trace
 
   format-check:
     name: Format Check
@@ -110,5 +106,4 @@ jobs:
 
       - name: Check Nix formatting
         run: |
-          nix flake lock --override-input asdf github:asdf-vm/asdf/master
           nix fmt -- --check .

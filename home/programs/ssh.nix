@@ -15,6 +15,19 @@
       };
     };
 
+    # TODO(NMD-51): Re-enable once public key is exported from 1Password to ~/.ssh/
+    # Prevent 1Password agent from offering YubiKey ED25519-SK key to GitHub/GitLab
+    # IdentitiesOnly=yes ensures only the explicitly listed IdentityFile is tried,
+    # so the SK key won't block on physical touch confirmation
+    # "github.com" = {
+    #   identitiesOnly = true;
+    #   identityFile = [ "~/.ssh/id_ed25519.pub" ];
+    # };
+    # "gitlab.com" = {
+    #   identitiesOnly = true;
+    #   identityFile = [ "~/.ssh/id_ed25519.pub" ];
+    # };
+
     "automationd.lan" = {
       user = "dmitry";
       # 1Password agent will offer matching keys automatically

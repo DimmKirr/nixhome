@@ -13,6 +13,9 @@ with pkgs; [
   rofi           # App launcher (like raycast)
   ddcutil        # Monitor control
 
+  # Remote desktop
+  tigervnc       # vncviewer (broken on darwin)
+
   # Additional Linux tools
   alsa-utils     # Audio control
   pciutils       # lspci

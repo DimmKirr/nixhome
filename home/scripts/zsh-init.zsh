@@ -6,8 +6,6 @@ fi
 # Env Vars
 export EDITOR='nvim'
 export NIX_BUILD_SHELL=$SHELL
-export ASDF_GOLANG_MOD_VERSION_ENABLED=true
-
 # Terraform local repo (for dev providers)
 export TF_CLI_CONFIG_FILE=${HOME}/.terraformrc
 
@@ -42,7 +40,7 @@ fi
 
 fpath+=($HOME/.local/share/zsh/site-functions)
 fpath+=($HOME/.rbenv/completions)
-fpath=(${ASDF_DATA_DIR:-$HOME/.asdf}/completions $fpath)
+
 
 
 # Login to 11password
@@ -499,18 +497,84 @@ pass
 EOF
 }
 
+function _tmuxsave_strip_interpreters() {
+  local yaml="$1"
+  [[ ! -f "$yaml" ]] && return
+  python3 - "$yaml" << 'EOF'
+import sys, re
+from pathlib import Path
+
+yaml_path = Path(sys.argv[1])
+text = yaml_path.read_text()
+
+# Process names that should not be restored as commands (they open REPLs)
+INTERPRETERS = {
+  'python', 'python2', 'python3',
+  'ipython', 'ipython3', 'bpython',
+  'node', 'nodejs',
+  'ruby', 'irb',
+  'lua', 'luajit',
+  'ghci', 'iex',
+  'julia', 'R',
+}
+
+def is_interpreter(cmd):
+  if not cmd:
+    return False
+  basename = cmd.strip().split('/')[-1]
+  # strip version suffix: python3.12 -> python3 -> python
+  name = re.split(r'[\.\d]', basename)[0]
+  return basename in INTERPRETERS or name in INTERPRETERS
+
+try:
+  import yaml as pyyaml
+except ImportError:
+  # No PyYAML — fall back to regex line removal
+  lines = []
+  for line in text.splitlines():
+    stripped = line.strip().lstrip('- ').strip()
+    if is_interpreter(stripped):
+      continue
+    lines.append(line)
+  yaml_path.write_text('\n'.join(lines) + '\n')
+  sys.exit(0)
+
+data = pyyaml.safe_load(text)
+
+def clean_pane(pane):
+  if isinstance(pane, str):
+    return 'pane' if is_interpreter(pane) else pane
+  if isinstance(pane, dict) and 'shell_command' in pane:
+    cmds = pane['shell_command']
+    if isinstance(cmds, str):
+      if is_interpreter(cmds):
+        del pane['shell_command']
+    elif isinstance(cmds, list):
+      pane['shell_command'] = [c for c in cmds if not is_interpreter(str(c))]
+      if not pane['shell_command']:
+        del pane['shell_command']
+  return pane
+
+for window in data.get('windows', []):
+  window['panes'] = [clean_pane(p) for p in window.get('panes', [])]
+
+yaml_path.write_text(pyyaml.dump(data, default_flow_style=False, allow_unicode=True))
+EOF
+}
+
 function tmuxsave() {
   local session_list
 
   if [[ -n "$TMUX_SESSION_NAME" ]]; then
     session_list=("$TMUX_SESSION_NAME")
   else
-    session_list=(${(f)"$(ls ~/.config/tmuxp/*.yaml 2>/dev/null | xargs -n1 basename | sed 's/\.yaml$//')"})
+    session_list=(${(f)"$(tmux list-sessions -F '#S' 2>/dev/null)"})
   fi
 
   for item in "${session_list[@]}"; do
     tmuxp freeze "$item" -y -q --force -o "~/.config/tmuxp/$item.yaml" &>/dev/null
     _tmuxsave_inject_cell_ids "$item" &>/dev/null
+    _tmuxsave_strip_interpreters "$HOME/.config/tmuxp/$item.yaml" &>/dev/null
     _tmuxsave_backup "$item" && echo "[OK] $item.yaml"
   done
 }

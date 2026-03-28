@@ -6,17 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Build and Switch Configuration
 ```bash
-# Build and switch to the new Darwin configuration (run without sudo)
-darwin-rebuild switch --flake .
+# Build and switch to the new Darwin configuration (requires sudo for system activation)
+sudo darwin-rebuild switch --flake .
 
-# Build without switching (test changes)
+# Build without switching (test changes, no sudo needed)
 darwin-rebuild build --flake .
 
-# If you get permission errors, ensure /nix is writable by your user
-# DO NOT use sudo for darwin-rebuild commands
-
 # If builds fail due to sandbox restrictions (common on macOS), try:
-darwin-rebuild switch --flake . --option sandbox false
+sudo darwin-rebuild switch --flake . --option sandbox false
 ```
 
 ### Format Nix Files

@@ -39,6 +39,7 @@ in {
   # Import reusable modules
   imports = [
     ../../modules/darwin/services.nix
+    ../../modules/darwin/setapp.nix
     # ../../modules/darwin/karabiner-elements.nix  # Custom module doesn't register app bundles properly
   ];
   # Karabiner-Elements requires Homebrew - nix packages don't register app bundles with macOS correctly
@@ -99,6 +100,14 @@ in {
 
   # Use homebrew to install casks and Mac App Store apps
   homebrew = import ../../home/dmitry/packages/homebrew.nix;
+
+  # Setapp-managed applications (requires Setapp cask above)
+  setapp = {
+    enable = true;
+    apps = [
+      "Commander One"
+    ];
+  };
 
   # OSX preferences
   system.defaults = {

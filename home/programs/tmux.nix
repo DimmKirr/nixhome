@@ -1,5 +1,15 @@
 {pkgs, ...}: let
 
+  cellConnect = pkgs.writeShellScript "cell-connect" ''
+    proto="$1"
+    wname="$2"
+    app=$(cell "$proto" --list 2>&1 | grep -oE "^$wname-[0-9]+" | head -1)
+    if [ -n "$app" ]; then
+      cell "$proto" "$app" >/dev/null 2>&1
+    else
+      tmux display-message "$(echo "$proto" | tr a-z A-Z): no app matching $wname"
+    fi
+  '';
 
   tmuxStatusWidgets = {
     clima = "#[fg=#ffb86c,bg=#00075a]#(${clima}/share/tmux-plugins/tmux-clima/scripts/clima.sh)#[default]";
@@ -224,13 +234,18 @@ in {
             "Swap Up"         u "swap-pane -U" \
             "Swap Down"       d "swap-pane -D" \
             "Swap Marked"     M "swap-pane -d -t '{marked}'" \
+            "#{?pane_marked_set,,-}Join to Marked (V)" j "join-pane -v -t '{marked}'" \
+            "#{?pane_marked_set,,-}Join to Marked (H)" J "join-pane -h -t '{marked}'" \
             "" "" "" \
             "Kill"            X "kill-pane" \
             "Respawn"         R "respawn-pane -k" \
             "Mark"            m "select-pane -m" \
             "Zoom"            z "resize-pane -Z" \
-            "Rename Pane" n "command-prompt -I '#{@label}' 'set -pt \"#{mouse_pane}\" @label \"%%\"; refresh-client'" \
-            "Clear Label" N "set -pt \"#{mouse_pane}\" @label \"\"; refresh-client"
+            "Rename Pane" n "select-pane -t '#{mouse_pane}'\; command-prompt -I '#{@label}' 'set -p @label \"%%\"; refresh-client'" \
+            "Clear Label" N "select-pane -t '#{mouse_pane}'\; set -p @label \"\"\; refresh-client" \
+            "" "" "" \
+            "Connect to VNC" V "run-shell '${cellConnect} vnc #{window_name}'" \
+            "Connect to RDP" r "run-shell '${cellConnect} rdp #{window_name}'"
 
 
         # Override default "prefix + ." menu
@@ -241,14 +256,19 @@ in {
           "Swap Up"          u "swap-pane -U" \
           "Swap Down"        d "swap-pane -D" \
           "Swap Marked"      m "swap-pane -d -t '{marked}'" \
+          "#{?pane_marked_set,,-}Join to Marked (V)" j "join-pane -v -t '{marked}'" \
+          "#{?pane_marked_set,,-}Join to Marked (H)" J "join-pane -h -t '{marked}'" \
           "" "" "" \
           "Kill"             X "kill-pane" \
           "Respawn"          R "respawn-pane -k" \
           "Mark"             M "select-pane -m" \
           "Zoom"             z "resize-pane -Z" \
           "" "" "" \
-          "Rename Pane" n "command-prompt -I '#{@label}' 'set -pt \"#{pane_id}\" @label \"%%\"; refresh-client'" \
-          "Clear Label" N "set -pt \"#{pane_id}\" @label \"\"; refresh-client"
+          "Rename Pane" n "command-prompt -I '#{@label}' 'set -p @label \"%%\"; refresh-client'" \
+          "Clear Label" N "set -p @label \"\"; refresh-client" \
+          "" "" "" \
+          "Connect to VNC" V "run-shell '${cellConnect} vnc #{window_name}'" \
+          "Connect to RDP" r "run-shell '${cellConnect} rdp #{window_name}'"
 
         # Custom Session Menu (right-click on status left / session name)
         bind-key -n MouseDown3StatusLeft display-menu -T "#[align=centre]Session Menu" -x M -y W \
@@ -277,6 +297,43 @@ in {
           "Rename"           n "command-prompt -I '#W' 'rename-window -- \"%%\"'" \
           "Kill"             X "kill-window"
 
+        #######################
+        ####### Layouts #######
+        #######################
+        # Layout menu: prefix + S
+        bind S display-menu -T "#[align=centre]Layouts" -x C -y C \
+          "Even Horizontal"           1 "select-layout even-horizontal" \
+          "Even Vertical"             2 "select-layout even-vertical" \
+          "Main Horizontal"           3 "select-layout main-horizontal" \
+          "Main Vertical"             4 "select-layout main-vertical" \
+          "Tiled"                     5 "select-layout tiled" \
+          "Main Horizontal Mirrored"  h "run-shell 'tmux set-window-option main-pane-height 2; tmux select-layout main-horizontal-mirrored'" \
+          "Main Vertical Mirrored"    v "select-layout main-vertical-mirrored" \
+          "Spread Even"               e "select-layout -E" \
+          "" "" "" \
+          "Save to slot 6"     S "run-shell 'tmux set -g @layout-6 \"#{window_layout}\"; tmux display \"Saved to 6\"'" \
+          "Save to slot 7"     s "run-shell 'tmux set -g @layout-7 \"#{window_layout}\"; tmux display \"Saved to 7\"'" \
+          "Save to slot 8"     D "run-shell 'tmux set -g @layout-8 \"#{window_layout}\"; tmux display \"Saved to 8\"'" \
+          "Save to slot 9"     d "run-shell 'tmux set -g @layout-9 \"#{window_layout}\"; tmux display \"Saved to 9\"'" \
+          "" "" "" \
+          "Restore slot 6"     6 "run-shell 'tmux select-layout \"$(tmux show -gv @layout-6)\"'" \
+          "Restore slot 7"     7 "run-shell 'tmux select-layout \"$(tmux show -gv @layout-7)\"'" \
+          "Restore slot 8"     8 "run-shell 'tmux select-layout \"$(tmux show -gv @layout-8)\"'" \
+          "Restore slot 9"     9 "run-shell 'tmux select-layout \"$(tmux show -gv @layout-9)\"'"
+
+        # Direct restore keybindings (M-8, M-9, M-0 are free; M-6, M-7 taken by built-in mirrored layouts)
+        bind M-8 run-shell 'tmux select-layout "$(tmux show -gv @layout-8)"'
+        bind M-9 run-shell 'tmux select-layout "$(tmux show -gv @layout-9)"'
+
+        # Toggle main pane (pane 0) height between expanded (95%) and collapsed (5%)
+        # z = zoom active pane (built-in), Z = toggle main pane size
+        bind Z run-shell '\
+          cur="$(tmux show-window-option -v main-pane-height 2>/dev/null)"; \
+          if [ "$cur" = "95%" ]; then \
+            tmux set-window-option main-pane-height 5%\; select-layout main-horizontal; \
+          else \
+            tmux set-window-option main-pane-height 95%\; select-layout main-horizontal; \
+          fi'
 
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'

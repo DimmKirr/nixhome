@@ -4,7 +4,7 @@
 
   settings = {
     # Left: dir → git_branch → git_status → direnv → character
-    format = "$directory$git_branch$git_status$direnv$character";
+    format = "$directory$git_branch$git_status$character";
     # Right: ENV var (custom_env_name) → context (user@host, ssh/root only) → cmd_duration
     right_format = "$env_var$username$hostname$cmd_duration";
     add_newline = false;
@@ -28,18 +28,10 @@
     };
 
     git_status = {
-      # Matches p10k: dirty=*, ahead=:⇡, behind=:⇣, diverged=:⇡⇣, commit=@
-      format    = "([$all_status$ahead_behind]($style) )";
-      style     = "242";
-      modified  = "*";
-      staged    = "*";
-      untracked = "*";
-      deleted   = "*";
-      renamed   = "*";
-      conflicted = "*";
-      ahead     = ":⇡";
-      behind    = ":⇣";
-      diverged  = ":⇡⇣";
+      style    = "242";
+      ahead    = ":⇡";
+      behind   = ":⇣";
+      diverged = ":⇡⇣";
     };
 
     cmd_duration = {
@@ -75,11 +67,6 @@
       disabled = false;
     };
 
-    direnv = {
-      disabled = false;
-      format   = "[$symbol$loaded/$allowed]($style) ";
-      style    = "242";
-      symbol   = "";
-    };
+    direnv.disabled = true;
   };
 }

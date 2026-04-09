@@ -46,7 +46,7 @@
 
     packages =
       (import ./packages/common.nix { inherit pkgs pkgsUnstable pkgsEdge; })
-      ++ (lib.optionals pkgs.stdenv.isDarwin (import ./packages/darwin.nix { inherit pkgs pkgsUnstable pkgsEdge; }))
+      ++ (lib.optionals pkgs.stdenv.isDarwin (import ./packages/darwin.nix { inherit pkgs pkgsUnstable; }))
       ++ (lib.optionals pkgs.stdenv.isLinux (import ./packages/linux.nix { inherit pkgs; }));
 
     stateVersion = "24.11";
@@ -77,7 +77,11 @@
     k9s = import ../programs/k9s.nix {inherit pkgsUnstable;};
 
     zsh = import ../programs/zsh.nix {inherit pkgs pkgsUnstable;};
+    mc = import ../programs/mc.nix {inherit pkgs;};
+    starship = import ../programs/starship.nix {};
   };
+
+  xdg.configFile."mc/skins/dracula256.ini".source = ../programs/mc-skins/dracula256.ini;
 
   services = {
   # Ollama disabled for now, ollama-0.12.11 fails
@@ -109,4 +113,3 @@
 # https://github.com/the-nix-way/nome
 # https://github.com/Th0rgal/horus-nix-home
 # https://github.com/Yumasi/nixos-home/blob/main/zsh.nix
-

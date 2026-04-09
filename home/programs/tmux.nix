@@ -335,6 +335,36 @@ in {
             tmux set-window-option main-pane-height 95%\; select-layout main-horizontal; \
           fi'
 
+        #######################
+        ##### Hubstaff ######
+        #######################
+        # Auto-switch Hubstaff project when switching tmux sessions
+        set-hook -g client-session-changed 'run-shell "\
+          if ! /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI status >/dev/null 2>&1; then \
+            open -a Hubstaff; \
+            for i in 1 2 3 4 5; do \
+              sleep 1; \
+              /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI status >/dev/null 2>&1 && break; \
+            done; \
+            if ! /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI status >/dev/null 2>&1; then \
+              tmux display-message \"HS: Hubstaff failed to start after 5s\"; \
+              exit 0; \
+            fi; \
+          fi; \
+          case #{hook_session_name} in \
+            MAP)  /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3497711 ;; \
+            HZL)  /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3497760 ;; \
+            NPT)  /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3497712 ;; \
+            HOME) /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3727679 ;; \
+            NMD)  /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3736729 ;; \
+            EVER) /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956768 ;; \
+            UPE)  /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956769 ;; \
+            DIMM) /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956770 ;; \
+            KIRR) /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956771 ;; \
+            *)    /Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI stop; \
+                  tmux display-message \"HS: no project mapped for session [#{hook_session_name}] — tracking stopped\" ;; \
+          esac"'
+
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'
 

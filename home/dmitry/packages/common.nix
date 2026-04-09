@@ -34,7 +34,7 @@ let
     git
     git-lfs
     git-secrets
-    mc
+    # mc is managed via programs.mc in home/programs/mc.nix
     python2
 
     kubernetes-helm

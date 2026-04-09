@@ -196,4 +196,3 @@ in {
 }
 # Inspired by:
 # https://github.com/mirkolenz/nixos/blob/main/system/darwin/settings.nix
-

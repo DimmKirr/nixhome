@@ -2,7 +2,6 @@
 {
   pkgs,
   pkgsUnstable,
-  pkgsEdge,
   ...
 }:
 with pkgs; [
@@ -16,10 +15,9 @@ with pkgs; [
 
   keepassxc
   discord      # x86_64 only, doesn't work on aarch64-linux
+  seclists     # Large wordlist package - only on darwin, too big for devbox
 ] ++ (with pkgsUnstable; [
   monitorcontrol
   betterdisplay
-]) ++ (with pkgsEdge; [
-  seclists     # Large wordlist package - only on darwin, too big for devbox
 #  zoom-us # Disabled b/c of issues with permissions (doesn't recognize them, likely b/c of symlinks)
 ])

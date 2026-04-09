@@ -323,6 +323,10 @@ alias hs-hzl-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_
 alias hs-npt-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3497712"
 alias hs-home-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3727679"
 alias hs-nmd-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3736729"
+alias hs-ever-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956768"
+alias hs-upe-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956769"
+alias hs-dimm-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956770"
+alias hs-kirr-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956771"
 alias hs-stop="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI stop"
 alias hs-status="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI status"
 
@@ -370,6 +374,22 @@ hs-home-toggle() {
 
 hs-nmd-toggle() {
     _hs_toggle 3736729
+}
+
+hs-ever-toggle() {
+    _hs_toggle 3956768
+}
+
+hs-upe-toggle() {
+    _hs_toggle 3956769
+}
+
+hs-dimm-toggle() {
+    _hs_toggle 3956770
+}
+
+hs-kirr-toggle() {
+    _hs_toggle 3956771
 }
 
 cleandocker() {
@@ -522,43 +542,17 @@ def is_interpreter(cmd):
   if not cmd:
     return False
   basename = cmd.strip().split('/')[-1]
-  # strip version suffix: python3.12 -> python3 -> python
   name = re.split(r'[\.\d]', basename)[0]
   return basename in INTERPRETERS or name in INTERPRETERS
 
-try:
-  import yaml as pyyaml
-except ImportError:
-  # No PyYAML — fall back to regex line removal
-  lines = []
-  for line in text.splitlines():
-    stripped = line.strip().lstrip('- ').strip()
-    if is_interpreter(stripped):
-      continue
-    lines.append(line)
-  yaml_path.write_text('\n'.join(lines) + '\n')
-  sys.exit(0)
-
-data = pyyaml.safe_load(text)
-
-def clean_pane(pane):
-  if isinstance(pane, str):
-    return 'pane' if is_interpreter(pane) else pane
-  if isinstance(pane, dict) and 'shell_command' in pane:
-    cmds = pane['shell_command']
-    if isinstance(cmds, str):
-      if is_interpreter(cmds):
-        del pane['shell_command']
-    elif isinstance(cmds, list):
-      pane['shell_command'] = [c for c in cmds if not is_interpreter(str(c))]
-      if not pane['shell_command']:
-        del pane['shell_command']
-  return pane
-
-for window in data.get('windows', []):
-  window['panes'] = [clean_pane(p) for p in window.get('panes', [])]
-
-yaml_path.write_text(pyyaml.dump(data, default_flow_style=False, allow_unicode=True))
+# Text-only approach: never parse/re-dump YAML (preserves layout strings exactly)
+lines = []
+for line in text.splitlines():
+  stripped = line.strip().lstrip('- ').strip()
+  if is_interpreter(stripped):
+    continue
+  lines.append(line)
+yaml_path.write_text('\n'.join(lines) + '\n')
 EOF
 }
 
@@ -683,3 +677,4 @@ git-all() {
 
 # Use 1Password SSH agent
 export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock
+

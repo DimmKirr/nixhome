@@ -41,6 +41,7 @@
     ".claude"
     ".context"
     ".devcell"
+    ".devcell.toml"
     "CLAUDE.md"
     ".worktrees"
     ".env"

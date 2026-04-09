@@ -70,16 +70,6 @@
       name = "zsh-users/zsh-history-substring-search";
       src = pkgs.zsh-history-substring-search;
     }
-    {
-      name = "powerlevel10k";
-      src = pkgs.zsh-powerlevel10k;
-      file = "share/zsh-powerlevel10k/powerlevel10k.zsh-theme";
-    }
-    {
-      name = "powerlevel10k-config";
-      src = ./../configs/p10k-config;
-      file = "p10k.zsh";
-    }
     # fasd is unmaintained - using zoxide instead (configured in programs.zoxide)
     # {
     #   name = "fasd";

@@ -65,6 +65,8 @@
     "utm"
     "zoom"
     "codex" # nix should work, but needs an overlay for newer version, so this for now.
+    "hubstaff"
+    "Sikarugir-App/sikarugir/sikarugir"
   ];
 
   brews = [

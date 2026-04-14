@@ -10,6 +10,7 @@ in {
   # Allow unfree system packages
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
+  nixpkgs.config.android_sdk.accept_license = true;
 
   environment.systemPackages = with pkgs; [
     home-manager
@@ -180,6 +181,9 @@ in {
   };
 
   environment = {
+    etc."ssh/sshd_config.d/locale.conf".text = ''
+      AcceptEnv LANG LC_*
+    '';
     # Allow TouchID in tmux
     etc."pam.d/sudo_local".text = ''
       # Managed by Nix Darwin

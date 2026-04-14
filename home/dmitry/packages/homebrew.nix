@@ -15,6 +15,7 @@
     "gemfury/tap"
     "opencode-ai/tap"
     "smokris/getwindowid"
+    "sikarugir-app/sikarugir"
   ];
 
   casks = [

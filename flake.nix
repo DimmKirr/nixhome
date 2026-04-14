@@ -124,6 +124,7 @@
             home-manager.darwinModules.home-manager
             {
               home-manager = {
+                useGlobalPkgs = true;
                 # include the home-manager module
                 users.dmitry = import ./home/dmitry/default.nix;
                 sharedModules = [

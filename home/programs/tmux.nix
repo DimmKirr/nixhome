@@ -3,11 +3,19 @@
   cellConnect = pkgs.writeShellScript "cell-connect" ''
     proto="$1"
     wname="$2"
-    app=$(cell "$proto" --list 2>&1 | grep -oE "^$wname-[0-9]+" | head -1)
+    wid="$3"
+    # Prefer explicit binding stored on the window, fall back to name grep
+    app=""
+    if [ -n "$wid" ]; then
+      app=$(tmux show-options -wqv -t "$wid" @cell-app 2>/dev/null)
+    fi
+    if [ -z "$app" ]; then
+      app=$(cell "$proto" --list --format=json 2>&1 | jq -r '.[].app_name' | grep -i "^$wname" | head -1)
+    fi
     if [ -n "$app" ]; then
       cell "$proto" "$app" >/dev/null 2>&1
     else
-      tmux display-message "$(echo "$proto" | tr a-z A-Z): no app matching $wname"
+      tmux display-message "$(echo "$proto" | tr a-z A-Z): no app matching $wname — use 'Set Cell App' to bind manually"
     fi
   '';
 
@@ -244,8 +252,9 @@ in {
             "Rename Pane" n "select-pane -t '#{mouse_pane}'\; command-prompt -I '#{@label}' 'set -p @label \"%%\"; refresh-client'" \
             "Clear Label" N "select-pane -t '#{mouse_pane}'\; set -p @label \"\"\; refresh-client" \
             "" "" "" \
-            "Connect to VNC" V "run-shell '${cellConnect} vnc #{window_name}'" \
-            "Connect to RDP" r "run-shell '${cellConnect} rdp #{window_name}'"
+            "Connect to VNC" V "run-shell '${cellConnect} vnc \"#{window_name}\" #{window_id}'" \
+            "Connect to RDP" r "run-shell '${cellConnect} rdp \"#{window_name}\" #{window_id}'" \
+            "Set Cell App"   a "command-prompt -I '#{@cell-app}' -p 'Cell app name:' 'set -w -t #{window_id} @cell-app \"%%\"'"
 
 
         # Override default "prefix + ." menu
@@ -267,8 +276,9 @@ in {
           "Rename Pane" n "command-prompt -I '#{@label}' 'set -p @label \"%%\"; refresh-client'" \
           "Clear Label" N "set -p @label \"\"; refresh-client" \
           "" "" "" \
-          "Connect to VNC" V "run-shell '${cellConnect} vnc #{window_name}'" \
-          "Connect to RDP" r "run-shell '${cellConnect} rdp #{window_name}'"
+          "Connect to VNC" V "run-shell '${cellConnect} vnc \"#{window_name}\" #{window_id}'" \
+          "Connect to RDP" r "run-shell '${cellConnect} rdp \"#{window_name}\" #{window_id}'" \
+          "Set Cell App"   a "command-prompt -I '#{@cell-app}' -p 'Cell app name:' 'set -w -t #{window_id} @cell-app \"%%\"'"
 
         # Custom Session Menu (right-click on status left / session name)
         bind-key -n MouseDown3StatusLeft display-menu -T "#[align=centre]Session Menu" -x M -y W \

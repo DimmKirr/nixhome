@@ -72,7 +72,7 @@ let
     kubepug
     kube-capacity
 
-    qemu
+    # qemu  # removed: conflicts with androidsdk's bundled qemu-img
     spice
     freerdp
     virt-viewer
@@ -162,6 +162,7 @@ let
 
     wireguard-tools
     opencode
+    cloudflared
 
     google-cloud-sdk  # gcloud CLI including gcloud run
     google-cloud-sql-proxy

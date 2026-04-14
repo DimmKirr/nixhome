@@ -91,9 +91,6 @@
 #    };
   };
 
-  nixpkgs.config.allowUnfree = true;
-  nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
-
   # All modules imported unconditionally - each module handles platform logic internally
   imports = [
     ../programs/ghostty.nix

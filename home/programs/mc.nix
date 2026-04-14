@@ -11,7 +11,7 @@
       preallocate_space = false;
       auto_menu = false;
       use_internal_view = true;
-      use_internal_edit = true;
+      use_internal_edit = false;
       clear_before_exec = true;
       confirm_delete = true;
       confirm_overwrite = true;

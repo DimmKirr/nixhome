@@ -16,6 +16,16 @@ with pkgs; [
   keepassxc
   discord      # x86_64 only, doesn't work on aarch64-linux
   seclists     # Large wordlist package - only on darwin, too big for devbox
+
+  # Android emulator (latest Pixel / Android 15, ARM64 native on Apple Silicon)
+  (androidenv.composeAndroidPackages {
+    platformVersions = [ "35" ];
+    abiVersions = [ "arm64-v8a" ];
+    includeEmulator = true;
+    includeSystemImages = true;
+    systemImageTypes = [ "google_apis_playstore" ];
+    cmdLineToolsVersion = "11.0";
+  }).androidsdk
 ] ++ (with pkgsUnstable; [
   monitorcontrol
   betterdisplay

@@ -457,6 +457,64 @@ function _tmuxsave_inject_cell_ids() {
   done
 }
 
+function _tmuxsave_reorder_panes() {
+  local yaml="$1"
+  [[ ! -f "$yaml" ]] && return
+
+  python3 - "$yaml" <<'PYEOF'
+import sys, re, yaml as pyyaml
+
+def extract_pane_ids(layout):
+    # Match leaf pane entries: WxH,X,Y,ID (no nested brackets follow)
+    return [int(m) for m in re.findall(r'\d+x\d+,\d+,\d+,(\d+)', layout)]
+
+path = sys.argv[1]
+with open(path) as f:
+    doc = pyyaml.safe_load(f)
+
+changed = False
+for window in doc.get('windows', []):
+    layout = window.get('layout', '')
+    panes = window.get('panes', [])
+    if len(panes) <= 1:
+        continue
+
+    id_order = extract_pane_ids(layout)
+    if not id_order:
+        continue
+
+    # Build map from CELL_ID -> pane dict
+    cell_map = {}
+    for pane in panes:
+        if isinstance(pane, dict):
+            cell_id = pane.get('environment', {}).get('CELL_ID')
+            if cell_id is not None:
+                cell_map[int(cell_id)] = pane
+
+    if not cell_map:
+        continue
+
+    # Reorder panes to match layout visual order
+    reordered = [cell_map[i] for i in id_order if i in cell_map]
+    # Append any panes not found in layout (shouldn't happen, but safe)
+    found_ids = {i for i in id_order if i in cell_map}
+    for pane in panes:
+        if isinstance(pane, dict):
+            cell_id = pane.get('environment', {}).get('CELL_ID')
+            if cell_id is None or int(cell_id) not in found_ids:
+                reordered.append(pane)
+
+    if [p.get('environment', {}).get('CELL_ID') for p in reordered] != \
+       [p.get('environment', {}).get('CELL_ID') for p in panes]:
+        window['panes'] = reordered
+        changed = True
+
+if changed:
+    with open(path, 'w') as f:
+        pyyaml.dump(doc, f, default_flow_style=False, allow_unicode=True)
+PYEOF
+}
+
 function _tmuxsave_backup() {
   local session="$1"
   local src="$HOME/.config/tmuxp/$session.yaml"
@@ -558,30 +616,64 @@ EOF
 
 function tmuxsave() {
   local session_list
+  local manifest="$HOME/.config/tmuxp/.session-order"
 
   if [[ -n "$TMUX_SESSION_NAME" ]]; then
     session_list=("$TMUX_SESSION_NAME")
   else
-    session_list=(${(f)"$(tmux list-sessions -F '#S' 2>/dev/null)"})
+    session_list=(${(f)"$(tmux list-sessions -F '#{session_last_used} #S' 2>/dev/null | sort -rn | awk '{print $2}')"})
   fi
 
   for item in "${session_list[@]}"; do
     tmuxp freeze "$item" -y -q --force -o "~/.config/tmuxp/$item.yaml" &>/dev/null
     _tmuxsave_inject_cell_ids "$item" &>/dev/null
     _tmuxsave_strip_interpreters "$HOME/.config/tmuxp/$item.yaml" &>/dev/null
+    _tmuxsave_reorder_panes "$HOME/.config/tmuxp/$item.yaml" &>/dev/null
     _tmuxsave_backup "$item" && echo "[OK] $item.yaml"
   done
+
+  # Save session order manifest (only when saving all sessions)
+  if [[ -z "$TMUX_SESSION_NAME" ]]; then
+    printf '%s\n' "${session_list[@]}" > "$manifest"
+    echo "[OK] .session-order (${#session_list[@]} sessions)"
+  fi
 }
 
 function tmuxload-dk() {
-  for item in NMD DIMM KIRR; do
-    tmuxp load "$item";
+  local manifest="$HOME/.config/tmuxp/.session-order"
+  local -a sessions
+
+  if [[ -f "$manifest" ]]; then
+    # Load only sessions that belong to this group, preserving manifest order
+    while IFS= read -r s; do
+      [[ "$s" == NMD || "$s" == DIMM || "$s" == KIRR ]] && sessions+=("$s")
+    done < "$manifest"
+    # Fall back to default order if none found in manifest
+    [[ ${#sessions[@]} -eq 0 ]] && sessions=(NMD DIMM KIRR)
+  else
+    sessions=(NMD DIMM KIRR)
+  fi
+
+  for item in "${sessions[@]}"; do
+    tmuxp load "$item"
   done
 }
 
 function tmuxload-wk() {
-  for item in NPT HZL; do
-    tmuxp load "$item";
+  local manifest="$HOME/.config/tmuxp/.session-order"
+  local -a sessions
+
+  if [[ -f "$manifest" ]]; then
+    while IFS= read -r s; do
+      [[ "$s" == NPT || "$s" == HZL ]] && sessions+=("$s")
+    done < "$manifest"
+    [[ ${#sessions[@]} -eq 0 ]] && sessions=(NPT HZL)
+  else
+    sessions=(NPT HZL)
+  fi
+
+  for item in "${sessions[@]}"; do
+    tmuxp load "$item"
   done
 }
 #

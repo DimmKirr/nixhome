@@ -5,6 +5,9 @@ result-*
 
 !./CLAUDE.md
 
+# tmux event/hubstaff logs
+*.log
+
 # Local overrides (not committed)
 local.nix
 *-local.nix

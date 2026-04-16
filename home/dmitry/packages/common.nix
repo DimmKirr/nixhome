@@ -98,6 +98,7 @@ let
     yq-go
     nmap
     netcat-gnu
+    mitmproxy
     gitleaks
     pre-commit
 

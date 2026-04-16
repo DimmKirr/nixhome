@@ -20,6 +20,7 @@
 
   casks = [
     "xquartz"
+    "scribus"
     "1password"
     "1password-cli"
     "bartender"
@@ -85,6 +86,7 @@
     "mint"
     "getwindowid"
     "tiger-vnc" # broken on darwin in nixpkgs, using homebrew instead
+    "qemu" # qemu-img and tools; nix qemu conflicts with androidsdk's bundled qemu-img
   ];
 
   masApps = {

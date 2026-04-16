@@ -16,6 +16,9 @@ with pkgs; [
   # Remote desktop
   tigervnc       # vncviewer (broken on darwin)
 
+  # Virtualization
+  qemu           # qemu-img and other QEMU tools
+
   # Additional Linux tools
   alsa-utils     # Audio control
   pciutils       # lspci

@@ -621,7 +621,7 @@ function tmuxsave() {
   if [[ -n "$TMUX_SESSION_NAME" ]]; then
     session_list=("$TMUX_SESSION_NAME")
   else
-    session_list=(${(f)"$(tmux list-sessions -F '#{session_last_used} #S' 2>/dev/null | sort -rn | awk '{print $2}')"})
+    session_list=(${(f)"$(tmux list-sessions -F '#{session_activity} #S' 2>/dev/null | sort -rn | awk '{print $2}')"})
   fi
 
   for item in "${session_list[@]}"; do

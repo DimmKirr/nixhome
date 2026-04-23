@@ -26,12 +26,11 @@ let
     docker-compose
     gvproxy
     xz
-    go-task
-
     kubectl
     k6
     obsidian
     git
+    git-filter-repo
     git-lfs
     git-secrets
     # mc is managed via programs.mc in home/programs/mc.nix
@@ -41,8 +40,6 @@ let
 
     curl
     ets
-
-    go-task
 
     asciinema
     termtosvg
@@ -65,7 +62,6 @@ let
     cobra-cli
 
     nil
-    go-task
 
     # Kubernetes
     kubent
@@ -98,6 +94,7 @@ let
     yq-go
     nmap
     netcat-gnu
+    fzf
     mitmproxy
     gitleaks
     pre-commit
@@ -126,6 +123,7 @@ let
     hurl
     fswatch
     home-assistant-cli
+    pipx
     shfmt
     ffmpeg
     tmuxp
@@ -177,6 +175,7 @@ let
     # seclists  # Moved to darwin.nix - too large for devbox container
     # libngspice  # Conflicts with ngspice from other dependencies
     claude-code
+    go-task
   ];
 in
 stable ++ unstable ++ edge

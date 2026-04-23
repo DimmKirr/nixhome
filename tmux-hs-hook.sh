@@ -22,6 +22,7 @@ case "$SESSION" in
   HERI) "$HS" start_project 3979462 >/dev/null 2>&1 ;;
   HOME) "$HS" start_project 3727679 >/dev/null 2>&1 ;;
   HZL)  "$HS" start_project 3497760 >/dev/null 2>&1 ;;
+  IOT)  "$HS" start_project 3984316 >/dev/null 2>&1 ;;
   KIRR) "$HS" start_project 3956771 >/dev/null 2>&1 ;;
   KIWA) "$HS" start_project 3979463 >/dev/null 2>&1 ;;
   MAD)  "$HS" start_project 3979464 >/dev/null 2>&1 ;;

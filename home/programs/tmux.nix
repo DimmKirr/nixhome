@@ -26,7 +26,7 @@
 
   tmuxDraculaPlugins = {
     public = "custom:now-playing.sh weather time";
-    private = "network-public-ip custom:now-playing.sh weather time";
+    private = "custom:now-playing.sh weather time";
   };
 #
 #  now-playing = pkgs.tmuxPlugins.mkTmuxPlugin {
@@ -88,6 +88,18 @@
   };
 
 
+
+  tmuxp-fzf = pkgs.tmuxPlugins.mkTmuxPlugin {
+    pluginName = "tmuxp-fzf";
+    version = "unstable-2024-03-01";
+    rtpFilePath = "main.tmux";
+    src = pkgs.fetchFromGitHub {
+      owner = "andersondanilo";
+      repo = "tmuxp-fzf";
+      rev = "821924e376139922691d73624f2da4dd9b2bf63d";
+      sha256 = "sha256-KDfQYX16IYpdJymsdzcS6yICJyny3dzpEYi2WrnnC10=";
+    };
+  };
 
 #  menus = pkgs.tmuxPlugins.mkTmuxPlugin {
 #    pluginName = "tmux-menus";
@@ -401,6 +413,12 @@ in {
         set -g @now-playing-stop-key ""
         set -g @now-playing-play-pause-key ""
         set -g @now-playing-next-key ""
+      '';
+    }
+    {
+      plugin = tmuxp-fzf;
+      extraConfig = ''
+        set-environment -g TMUXP_FZF_LAUNCH_KEY 'T'
       '';
     }
     {

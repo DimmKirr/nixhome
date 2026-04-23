@@ -12,6 +12,8 @@
   home = {
     sessionVariables = {
       TZ = "UTC";
+      PIPX_HOME = "$HOME/.local/pipx";
+      PIPX_BIN_DIR = "$HOME/.local/bin";
       DEVCELL_NIXHOME_PATH = "/Users/dmitry/dev/dimmkirr/devcell/nixhome";
       PYTHONPATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/yt-dl-plugins"

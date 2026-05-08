@@ -84,6 +84,8 @@
   };
 
   xdg.configFile."mc/skins/dracula256.ini".source = ../programs/mc-skins/dracula256.ini;
+  xdg.configFile."vifm/vifmrc".source = ../programs/vifm/vifmrc;
+  xdg.configFile."vifm/colors".source = ../programs/vifm/colors;
 
   services = {
   # Ollama disabled for now, ollama-0.12.11 fails
@@ -99,6 +101,7 @@
     ../programs/ize.nix
     ../programs/atun.nix
     ../programs/karabiner.nix
+    ../programs/finicky.nix
     ../programs/claude-code.nix
     # ../programs/opencode.nix  # Removed: home-manager 25.11 has built-in programs.opencode
     ../programs/wokwi-cli.nix

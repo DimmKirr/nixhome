@@ -95,6 +95,9 @@ let
     nmap
     netcat-gnu
     fzf
+    vifm
+    yazi
+    lf
     mitmproxy
     gitleaks
     pre-commit
@@ -177,5 +180,13 @@ let
     claude-code
     go-task
   ];
+  # Local script: per-session tmux snapshot tool (replaces bash tmuxsave pipeline).
+  # Tests live next to the script: home/scripts/tmux/snapshot/test_snapshot.py
+  # flakeIgnore: skip all cosmetic pep8 (E*) and pep8-warnings (W*); pyflakes (F*) still runs.
+  tmux-snapshot = pkgs.writers.writePython3Bin "tmux-snapshot" {
+    flakeIgnore = [ "E" "W" ];
+  } (
+    builtins.readFile ../../scripts/tmux/snapshot/snapshot.py
+  );
 in
-stable ++ unstable ++ edge
+stable ++ unstable ++ edge ++ [ tmux-snapshot ]

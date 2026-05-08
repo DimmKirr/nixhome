@@ -27,6 +27,7 @@ case "$SESSION" in
   KIWA) "$HS" start_project 3979463 >/dev/null 2>&1 ;;
   MAD)  "$HS" start_project 3979464 >/dev/null 2>&1 ;;
   MAP)  "$HS" start_project 3497711 >/dev/null 2>&1 ;;
+  MISKA) "$HS" start_project 1751709 >/dev/null 2>&1 ;;
   NMD)  "$HS" start_project 3736729 >/dev/null 2>&1 ;;
   NPT)  "$HS" start_project 3497712 >/dev/null 2>&1 ;;
   PTC)  "$HS" start_project 3979459 >/dev/null 2>&1 ;;

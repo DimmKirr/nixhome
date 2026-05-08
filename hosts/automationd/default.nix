@@ -196,6 +196,7 @@ in {
     chime = false; # Disable startup chime
   };
 
+
   system.primaryUser = "dmitry";
 }
 # Inspired by:

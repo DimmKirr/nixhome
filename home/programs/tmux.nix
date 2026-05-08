@@ -1,5 +1,90 @@
 {pkgs, ...}: let
 
+  # Silent auto-save tick. Embedded in status-right so it fires on every
+  # status refresh; only runs tmux-snapshot when @snapshot-save-interval
+  # minutes have elapsed since @snapshot-last-save. Must emit nothing.
+  snapshotTick = pkgs.writeShellScript "tmux-snapshot-tick" ''
+    interval_min=$(tmux show -gqv @snapshot-save-interval)
+    [ -z "$interval_min" ] && interval_min=10
+    interval=$((interval_min * 60))
+
+    last=$(tmux show -gqv @snapshot-last-save)
+    [ -z "$last" ] && last=0
+
+    now=$(date +%s)
+    if [ "$((now - last))" -ge "$interval" ]; then
+      if tmux-snapshot save-all >/dev/null 2>&1; then
+        tmux set -g @snapshot-last-save "$now"
+      fi
+    fi
+  '';
+
+  # Restore counterpart for prefix + Ctrl-r. Loads any session in the
+  # `.session-order` manifest that isn't currently live — never touches
+  # existing sessions, so accidental presses are safe. Reports count via
+  # tmux display-message at the end.
+  snapshotRestoreCurrent = pkgs.writeShellScript "tmux-snapshot-restore-current" ''
+    s="$1"
+    DIR="$HOME/.config/tmuxp"
+    yaml="$DIR/$s.yaml"
+    if [ ! -f "$yaml" ]; then
+      tmux display-message "tmux-snapshot: no snapshot for $s"
+      exit 0
+    fi
+    # tmux normalizes session names — dots become underscores. Use only
+    # underscore-safe chars so "$tmp" matches what tmux actually stores,
+    # otherwise the cleanup `kill-session -t "$tmp"` finds nothing and
+    # the bak session lingers.
+    tmp="''${s}_bak_$$"
+    tmux rename-session -t "$s" "$tmp" || {
+      tmux display-message "tmux-snapshot: rename failed for $s"; exit 1; }
+    if tmux-snapshot load "$yaml" >/dev/null 2>&1; then
+      tmux switch-client -t "$s" 2>/dev/null
+      tmux kill-session -t "$tmp" 2>/dev/null
+      tmux display-message "tmux-snapshot: restored $s from snapshot"
+    else
+      tmux rename-session -t "$tmp" "$s"
+      tmux display-message "tmux-snapshot: FAILED to restore $s — kept original"
+    fi
+  '';
+
+  snapshotRestore = pkgs.writeShellScript "tmux-snapshot-restore" ''
+    DIR="$HOME/.config/tmuxp"
+    if [ ! -d "$DIR" ]; then
+      tmux display-message "tmux-snapshot: no tmuxp dir at $DIR"
+      exit 0
+    fi
+
+    manifest="$DIR/.session-order"
+    if [ -f "$manifest" ]; then
+      sessions=$(cat "$manifest")
+    else
+      # Fallback: every yaml in the dir, sorted by mtime (newest first).
+      sessions=$(ls -t "$DIR"/*.yaml 2>/dev/null | sed 's|.*/||; s|\.yaml$||')
+    fi
+
+    restored=0
+    skipped=0
+    failed=0
+    for s in $sessions; do
+      yaml="$DIR/$s.yaml"
+      [ -f "$yaml" ] || continue
+      if tmux has-session -t "$s" 2>/dev/null; then
+        skipped=$((skipped + 1))
+        continue
+      fi
+      if tmux-snapshot load "$yaml" >/dev/null 2>&1; then
+        restored=$((restored + 1))
+      else
+        failed=$((failed + 1))
+      fi
+    done
+
+    msg="tmux-snapshot: restored $restored, skipped $skipped (already live)"
+    [ "$failed" -gt 0 ] && msg="$msg, FAILED $failed"
+    tmux display-message "$msg"
+  '';
+
   cellConnect = pkgs.writeShellScript "cell-connect" ''
     proto="$1"
     wname="$2"
@@ -478,26 +563,40 @@ in {
         '
       '';
     }
-    {
-      plugin = resurrect;
-      extraConfig = ''
-        set -g @resurrect-strategy-vim 'session'
-        set -g @resurrect-strategy-nvim 'session'
-        set -g @resurrect-capture-pane-contents 'on'
-      '';
-    }
-
-    {
-      plugin = continuum;
-      extraConfig = ''
-        set -g @continuum-restore 'off'
-        set -g @continuum-boot 'off'
-        set -g @continuum-save-interval '10'
-      '';
-    }
     better-mouse-mode
     sensible
-    yank
+    {
+      # tmux-snapshot save/auto-save. Replaces tmux-resurrect + tmux-continuum.
+      # Attached to `yank` (the last plugin) so this config runs AFTER
+      # Dracula sets `status-right`, letting `set -ag` append cleanly.
+      plugin = yank;
+      extraConfig = ''
+        # How often the silent tick actually fires save (minutes).
+        set -g @snapshot-save-interval '10'
+
+        # prefix + C-s : save CURRENT session.
+        # prefix + M-s : save ALL sessions.
+        bind C-s run-shell 'tmux-snapshot save "#S" >/dev/null 2>&1 \
+          && tmux display-message "tmux-snapshot: saved #S to ~/.config/tmuxp/#S.yaml" \
+          || tmux display-message "tmux-snapshot: FAILED to save #S — see ~/.config/tmuxp"'
+        bind M-s run-shell 'tmux-snapshot save-all >/dev/null 2>&1 \
+          && tmux display-message "tmux-snapshot: saved ALL sessions to ~/.config/tmuxp" \
+          || tmux display-message "tmux-snapshot: FAILED to save all — see ~/.config/tmuxp"'
+
+        # prefix + C-r : restore CURRENT session from its snapshot (overwrites
+        # the live session by renaming it aside, loading the yaml, switching
+        # the client over, and killing the old one).
+        # prefix + M-r : restore ALL missing sessions from the manifest;
+        # already-live sessions are skipped, never disturbed.
+        bind C-r run-shell '${snapshotRestoreCurrent} "#S"'
+        bind M-r run-shell '${snapshotRestore}'
+
+        # Periodic auto-save: status-right interpolation runs every
+        # status-interval (15s default). The script no-ops unless the
+        # configured interval has elapsed since @snapshot-last-save.
+        set -ag status-right '#(${snapshotTick})'
+      '';
+    }
 
   ];
 }

@@ -1,0 +1,85 @@
+" vifmrc — managed by nix (home/programs/vifm/vifmrc)
+
+" ------ Core ------
+set vicmd=nvim
+set syscalls
+set trash
+set history=100
+set nofollowlinks
+set sortnumbers
+set undolevels=100
+set vimhelp
+set norunexec
+set timefmt='%Y-%m-%d %H:%M'
+set wildmenu
+set wildstyle=popup
+set suggestoptions=normal,visual,view,otherpane,keys,marks,registers
+set ignorecase
+set smartcase
+set nohlsearch
+set incsearch
+set scrolloff=4
+set slowfs=curlftpfs
+set statusline="  %t%= %A %10u:%-7g %15s %20d  "
+
+" ------ Theme ------
+colorscheme dracula
+
+" ------ Previews (require: bat, exa/eza, mediainfo, chafa) ------
+fileviewer *.[1-8] man ./%c | col -b
+fileviewer *.md,*.markdown bat --color=always --style=plain %c 2>/dev/null || cat %c
+fileviewer */ eza -la --color=always --group-directories-first %c 2>/dev/null || ls -la %c
+fileviewer <text/*> bat --color=always --style=plain --paging=never %c 2>/dev/null || cat %c
+fileviewer *.json,*.yaml,*.yml,*.toml,*.nix bat --color=always --style=plain %c 2>/dev/null || cat %c
+fileviewer *.zip,*.jar,*.war,*.ear unzip -l %c
+fileviewer *.tar,*.tar.gz,*.tgz tar -tzf %c
+fileviewer *.png,*.jpg,*.jpeg,*.gif,*.bmp,*.webp chafa -f symbols --size=80x25 %c 2>/dev/null
+
+" ------ Filetype openers ------
+filetype *.md,*.markdown,*.txt,*.json,*.yaml,*.yml,*.toml,*.nix,*.sh,*.py,*.go nvim
+filextype *.png,*.jpg,*.jpeg,*.gif,*.bmp,*.webp open %c &
+filextype *.mp4,*.mkv,*.webm,*.mov,*.avi open %c &
+filextype *.pdf open %c &
+
+" ------ MC Compatibility ------
+" Function-key bindings that match Midnight Commander muscle memory.
+" Vifm-native equivalents in parens; both keep working.
+nnoremap <F3> :!less %f<cr>             " view  (vim: just press l on file)
+nnoremap <F4> :edit<cr>                  " edit  (vim: e)
+nnoremap <F5> :copy<cr>                  " copy to other pane (vim: yy then p)
+nnoremap <F6> :move<cr>                  " move to other pane (vim: dd then p)
+nnoremap <F7> :mkdir<space>              " mkdir
+nnoremap <F8> :delete<cr>                " trash (vim: dd / DD)
+nnoremap <F10> :quit<cr>                 " quit  (vim: ZZ / :q)
+
+" Pane sync — mc has no equivalent, but mc-refugees swear by these.
+nnoremap <a-i> :sync<cr>                 " other pane := this pane's dir
+nnoremap <a-o> :sync %c<cr>              " other pane := dir under cursor
+" mc-style ESC-prefix equivalents (for muscle memory from terminals
+" that delivered Alt as ESC+key). Press ESC then i within ~250ms.
+nnoremap <esc>i :sync<cr>
+nnoremap <esc>o :sync %c<cr>
+
+" Toggle hidden files (mc: Ctrl-H)
+nnoremap <c-h> za
+
+" Quick-view toggle (mc: Ctrl-Q ish — preview right pane)
+nnoremap <c-q> :view<cr>
+
+" ------ Mappings ------
+" Reload vifmrc
+nnoremap ,r :write | restart full<cr>
+" Open file in editor
+nnoremap o :!nvim %f<cr>
+" Yank current path
+nnoremap yd :!printf %d | pbcopy<cr>
+nnoremap yf :!printf %c:p | pbcopy<cr>
+" fzf jump (requires fzf)
+nnoremap <c-f> :execute 'goto' fnameescape(term('find . -type f 2>/dev/null | fzf 2>/dev/tty'))<cr>
+" Toggle dotfiles
+nnoremap zh za
+
+" ------ Marks ------
+mark h ~/
+mark d ~/dev
+mark c ~/.config

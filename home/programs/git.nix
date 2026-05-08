@@ -41,6 +41,7 @@
     ".claude"
     ".context"
     ".devcell"
+    ".local"
     ".devcell.toml"
     "CLAUDE.md"
     ".worktrees"

@@ -412,230 +412,28 @@ cleandocker() {
 
     echo "Pruning Volumes"
     docker volume prune -f
+
+    echo "Pruning Buildx Cache"
+    docker buildx prune -af
   fi
 }
 
-
-function _tmuxsave_inject_cell_ids() {
-  local session="$1"
-  local yaml="$HOME/.config/tmuxp/$session.yaml"
-
-  [[ ! -f "$yaml" ]] && return
-
-  local window_count wi
-  window_count=$(yq '.windows | length' "$yaml")
-
-  for ((wi=0; wi<window_count; wi++)); do
-    local window_name
-    window_name=$(yq ".windows[$wi].window_name" "$yaml")
-
-    local pane_ids=()
-    pane_ids=(${(f)"$(tmux list-panes -t "${session}:${window_name}" -F '#{pane_id}' 2>/dev/null | sed 's/^%//')"})
-    [[ ${#pane_ids} -eq 0 ]] && continue
-
-    local pane_count pi
-    pane_count=$(yq ".windows[$wi].panes | length" "$yaml")
-
-    for ((pi=0; pi<pane_count && pi<${#pane_ids}; pi++)); do
-      local pane_id="${pane_ids[$((pi+1))]}"  # zsh arrays are 1-indexed
-      local pane_tag
-      pane_tag=$(yq ".windows[$wi].panes[$pi] | tag" "$yaml")
-
-      if [[ "$pane_tag" == "!!str" ]]; then
-        local shell_cmd
-        shell_cmd=$(yq ".windows[$wi].panes[$pi]" "$yaml")
-        SHELL_CMD="$shell_cmd" PANE_ID="$pane_id" \
-          yq -i ".windows[$wi].panes[$pi] = {\"shell_command\": strenv(SHELL_CMD), \"environment\": {\"CELL_ID\": strenv(PANE_ID)}}" "$yaml"
-      else
-        local existing
-        existing=$(yq ".windows[$wi].panes[$pi].environment.CELL_ID" "$yaml")
-        if [[ "$existing" == "null" ]]; then
-          PANE_ID="$pane_id" yq -i ".windows[$wi].panes[$pi].environment.CELL_ID = strenv(PANE_ID)" "$yaml"
-        fi
-      fi
-    done
-  done
-}
-
-function _tmuxsave_reorder_panes() {
-  local yaml="$1"
-  [[ ! -f "$yaml" ]] && return
-
-  python3 - "$yaml" <<'PYEOF'
-import sys, re, yaml as pyyaml
-
-def extract_pane_ids(layout):
-    # Match leaf pane entries: WxH,X,Y,ID (no nested brackets follow)
-    return [int(m) for m in re.findall(r'\d+x\d+,\d+,\d+,(\d+)', layout)]
-
-path = sys.argv[1]
-with open(path) as f:
-    doc = pyyaml.safe_load(f)
-
-changed = False
-for window in doc.get('windows', []):
-    layout = window.get('layout', '')
-    panes = window.get('panes', [])
-    if len(panes) <= 1:
-        continue
-
-    id_order = extract_pane_ids(layout)
-    if not id_order:
-        continue
-
-    # Build map from CELL_ID -> pane dict
-    cell_map = {}
-    for pane in panes:
-        if isinstance(pane, dict):
-            cell_id = pane.get('environment', {}).get('CELL_ID')
-            if cell_id is not None:
-                cell_map[int(cell_id)] = pane
-
-    if not cell_map:
-        continue
-
-    # Reorder panes to match layout visual order
-    reordered = [cell_map[i] for i in id_order if i in cell_map]
-    # Append any panes not found in layout (shouldn't happen, but safe)
-    found_ids = {i for i in id_order if i in cell_map}
-    for pane in panes:
-        if isinstance(pane, dict):
-            cell_id = pane.get('environment', {}).get('CELL_ID')
-            if cell_id is None or int(cell_id) not in found_ids:
-                reordered.append(pane)
-
-    if [p.get('environment', {}).get('CELL_ID') for p in reordered] != \
-       [p.get('environment', {}).get('CELL_ID') for p in panes]:
-        window['panes'] = reordered
-        changed = True
-
-if changed:
-    with open(path, 'w') as f:
-        pyyaml.dump(doc, f, default_flow_style=False, allow_unicode=True)
-PYEOF
-}
-
-function _tmuxsave_backup() {
-  local session="$1"
-  local src="$HOME/.config/tmuxp/$session.yaml"
-  local backup_base="$HOME/.config/tmuxp/backups"
-  local now
-  now=$(date '+%Y-%m-%dT%H-%M-%S')
-
-  [[ ! -f "$src" ]] && return
-
-  python3 - "$session" "$src" "$backup_base" "$now" << 'EOF'
-import sys, shutil
-from datetime import datetime
-from pathlib import Path
-
-session, src, backup_base, now_str = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-now = datetime.strptime(now_str, '%Y-%m-%dT%H-%M-%S')
-
-for tier in ['recent', 'daily', 'weekly', 'monthly']:
-    Path(f'{backup_base}/{tier}').mkdir(parents=True, exist_ok=True)
-
-filename = f'{session}-{now_str}.yaml'
-
-def get_period(dt, tier):
-    if tier == 'daily':   return dt.strftime('%Y-%m-%d')
-    if tier == 'weekly':  return dt.strftime('%G-W%V')
-    if tier == 'monthly': return dt.strftime('%Y-%m')
-    return None
-
-def parse_dt(f):
-    stem = f.stem
-    prefix = f'{session}-'
-    if not stem.startswith(prefix):
-        return None
-    try:
-        return datetime.strptime(stem[len(prefix):], '%Y-%m-%dT%H-%M-%S')
-    except Exception:
-        return None
-
-limits = {'recent': 7, 'daily': 7, 'weekly': 4, 'monthly': 12}
-
-for tier, limit in limits.items():
-    tier_dir = Path(f'{backup_base}/{tier}')
-    # For tiered saves: remove existing files from same period (keep only latest per period)
-    if tier != 'recent':
-        current_period = get_period(now, tier)
-        for f in tier_dir.glob(f'{session}-*.yaml'):
-            dt = parse_dt(f)
-            if dt and get_period(dt, tier) == current_period:
-                f.unlink()
-    # Copy current save into this tier
-    shutil.copy2(src, tier_dir / filename)
-    # Rotate: drop oldest beyond limit
-    files = sorted(tier_dir.glob(f'{session}-*.yaml'))
-    for f in files[:-limit]:
-        f.unlink()
-
-pass
-EOF
-}
-
-function _tmuxsave_strip_interpreters() {
-  local yaml="$1"
-  [[ ! -f "$yaml" ]] && return
-  python3 - "$yaml" << 'EOF'
-import sys, re
-from pathlib import Path
-
-yaml_path = Path(sys.argv[1])
-text = yaml_path.read_text()
-
-# Process names that should not be restored as commands (they open REPLs)
-INTERPRETERS = {
-  'python', 'python2', 'python3',
-  'ipython', 'ipython3', 'bpython',
-  'node', 'nodejs',
-  'ruby', 'irb',
-  'lua', 'luajit',
-  'ghci', 'iex',
-  'julia', 'R',
-}
-
-def is_interpreter(cmd):
-  if not cmd:
-    return False
-  basename = cmd.strip().split('/')[-1]
-  name = re.split(r'[\.\d]', basename)[0]
-  return basename in INTERPRETERS or name in INTERPRETERS
-
-# Text-only approach: never parse/re-dump YAML (preserves layout strings exactly)
-lines = []
-for line in text.splitlines():
-  stripped = line.strip().lstrip('- ').strip()
-  if is_interpreter(stripped):
-    continue
-  lines.append(line)
-yaml_path.write_text('\n'.join(lines) + '\n')
-EOF
-}
 
 function tmuxsave() {
-  local session_list
-  local manifest="$HOME/.config/tmuxp/.session-order"
-
-  if [[ -n "$TMUX_SESSION_NAME" ]]; then
-    session_list=("$TMUX_SESSION_NAME")
+  # Usage:
+  #   tmuxsave        -> save ALL sessions + manifest
+  #   tmuxsave .      -> save current session only (must be inside tmux)
+  #   tmuxsave NAME   -> save the named session
+  if [[ "$1" == "." ]]; then
+    if [[ -z "$TMUX_SESSION_NAME" ]]; then
+      echo "tmuxsave .: not inside tmux (TMUX_SESSION_NAME unset)" >&2
+      return 1
+    fi
+    tmux-snapshot save "$TMUX_SESSION_NAME"
+  elif [[ -n "$1" ]]; then
+    tmux-snapshot save "$1"
   else
-    session_list=(${(f)"$(tmux list-sessions -F '#{session_activity} #S' 2>/dev/null | sort -rn | awk '{print $2}')"})
-  fi
-
-  for item in "${session_list[@]}"; do
-    tmuxp freeze "$item" -y -q --force -o "~/.config/tmuxp/$item.yaml" &>/dev/null
-    _tmuxsave_inject_cell_ids "$item" &>/dev/null
-    _tmuxsave_strip_interpreters "$HOME/.config/tmuxp/$item.yaml" &>/dev/null
-    _tmuxsave_reorder_panes "$HOME/.config/tmuxp/$item.yaml" &>/dev/null
-    _tmuxsave_backup "$item" && echo "[OK] $item.yaml"
-  done
-
-  # Save session order manifest (only when saving all sessions)
-  if [[ -z "$TMUX_SESSION_NAME" ]]; then
-    printf '%s\n' "${session_list[@]}" > "$manifest"
-    echo "[OK] .session-order (${#session_list[@]} sessions)"
+    tmux-snapshot save-all
   fi
 }
 
@@ -655,7 +453,7 @@ function tmuxload-dk() {
   fi
 
   for item in "${sessions[@]}"; do
-    tmuxp load "$item"
+    tmux-snapshot load "$item"
   done
 }
 
@@ -673,7 +471,7 @@ function tmuxload-wk() {
   fi
 
   for item in "${sessions[@]}"; do
-    tmuxp load "$item"
+    tmux-snapshot load "$item"
   done
 }
 #
@@ -769,4 +567,21 @@ git-all() {
 
 # Use 1Password SSH agent
 export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock
+
+# vifm: cd into the dir vifm was last in (mc-style "exit drops you here").
+# Aliased as `r` to mirror the common mc workflow: r → browse → q → land.
+vicd() {
+  local dst
+  dst="$(mktemp -t vifm-cd.XXXXXX)" || return 1
+  vifm --choose-dir="$dst" "$@"
+  local target
+  target="$(cat "$dst")"
+  rm -f "$dst"
+  if [ -z "$target" ]; then
+    echo 'vicd: no directory chosen'
+    return 1
+  fi
+  cd "$target" || return 1
+}
+alias r='vicd .'
 

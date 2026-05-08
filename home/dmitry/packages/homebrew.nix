@@ -16,10 +16,11 @@
     "opencode-ai/tap"
     "smokris/getwindowid"
     "sikarugir-app/sikarugir"
+    "porter-dev/porter"
   ];
 
   casks = [
-    "xquartz"
+    # "xquartz"  # disabled: brew fetch fails during darwin-rebuild (cask load error)
     "scribus"
     "1password"
     "1password-cli"
@@ -38,6 +39,7 @@
     "royal-tsx"
     "chatgpt"
     "firefox"
+    "finicky"
     "karabiner-elements" # Must use Homebrew - nix can't register app bundles with macOS
     "macfuse"
     "claude"
@@ -87,6 +89,7 @@
     "getwindowid"
     "tiger-vnc" # broken on darwin in nixpkgs, using homebrew instead
     "qemu" # qemu-img and tools; nix qemu conflicts with androidsdk's bundled qemu-img
+    "porter-dev/porter/porter" # porter.run CLI — not in nixpkgs
   ];
 
   masApps = {
@@ -97,7 +100,6 @@
     "WireGuard" = 1451685025;
     "DigiDoc4 Client" = 1370791134;
     "Safari WebID" = 1576665083;
-    "Canva" = 897446215;
 #    "Tailscale" = 1475387142; # commented due to failed update/upgrade. Next time try nixpkgs darwin version again
     "Final Cut Pro" = 424389933;
   };

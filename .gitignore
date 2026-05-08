@@ -8,6 +8,9 @@ result-*
 # tmux event/hubstaff logs
 *.log
 
+# Scratch / working files
+tmp/
+
 # Local overrides (not committed)
 local.nix
 *-local.nix

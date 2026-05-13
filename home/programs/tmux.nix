@@ -1,4 +1,9 @@
-{pkgs, ...}: let
+{pkgs, lib ? pkgs.lib, ...}: let
+
+  # Universal tmux theming framework — palettes, widgets, composer.
+  # User-facing knob lives in ./theme.nix.
+  theme     = import ./theme.nix { inherit lib; preset = "dracula"; };
+  framework = import ./tmux { inherit lib pkgs theme; };
 
   # Silent auto-save tick. Embedded in status-right so it fires on every
   # status refresh; only runs tmux-snapshot when @snapshot-save-interval
@@ -104,15 +109,8 @@
     fi
   '';
 
-  tmuxStatusWidgets = {
-    clima = "#[fg=#ffb86c,bg=#00075a]#(${clima}/share/tmux-plugins/tmux-clima/scripts/clima.sh)#[default]";
-    nowPlaying = "#[fg=#ff79c6,bg=#00075a]#(${now-playing}/share/tmux-plugins/tmux-now-playing/scripts/now-playing.sh)#[default]";
-  };
-
-  tmuxDraculaPlugins = {
-    public = "custom:now-playing.sh weather time";
-    private = "custom:now-playing.sh weather time";
-  };
+  # tmuxStatusWidgets / tmuxDraculaPlugins removed — replaced by framework widgets
+  # in home/programs/tmux/widgets/. See ./tmux/default.nix for composition.
 #
 #  now-playing = pkgs.tmuxPlugins.mkTmuxPlugin {
 #    pluginName = "tmux-now-playing";
@@ -198,54 +196,7 @@
 #    };
 #  };
 
-  # Override dracula to add now-playing as a custom script
-  dracula = pkgs.tmuxPlugins.dracula.overrideAttrs (oldAttrs: {
-    postInstall =
-      (oldAttrs.postInstall or "")
-      + ''
-        # Create bash script that executes now-playing's music.sh from correct directory
-        cat > $out/share/tmux-plugins/dracula/scripts/now-playing.sh << EOFNP
-          #!${pkgs.bash}/bin/bash
-          # Change to now-playing scripts directory so sourced files can be found
-          cd "${now-playing}/share/tmux-plugins/tmux-now-playing/scripts"
-
-          # Execute music.sh from the correct directory
-          exec ./music.sh "\$@"
-        EOFNP
-        chmod +x $out/share/tmux-plugins/dracula/scripts/now-playing.sh
-
-        # Create bash script that executes air from powerline
-        cat > $out/share/tmux-plugins/dracula/scripts/air.sh << EOFAIR
-          #!${pkgs.bash}/bin/bash
-          # Change to now-playing scripts directory so sourced files can be found
-          cd "${powerline}/share/tmux-plugins/tmux-powerline/segments"
-
-          # Execute air.sh from the correct directory
-          exec ./air.sh "\$@"
-        EOFAIR
-        chmod +x $out/share/tmux-plugins/dracula/scripts/air.sh
-
-        # Create bash script that executes air from powerline
-        cat > $out/share/tmux-plugins/dracula/scripts/clima.sh << EOFAIR
-          #!${pkgs.bash}/bin/bash
-          cd "${clima}/share/tmux-plugins/tmux-clima/scripts"
-
-          # Execute air.sh from the correct directory
-          exec ./clima.sh "\$@"
-        EOFAIR
-        chmod +x $out/share/tmux-plugins/dracula/scripts/clima.sh
-
-
-        # Create bash script that creates a spacer (empty space)
-        cat > $out/share/tmux-plugins/dracula/scripts/spacer.sh << EOFSPCR
-          #!${pkgs.bash}/bin/bash
-          printf "\033[P40m \033[0m"
-        EOFSPCR
-        chmod +x $out/share/tmux-plugins/dracula/scripts/spacer.sh
-
-
-      '';
-  });
+  # (Removed temporary Dracula override — framework owns status bar now.)
 in {
   enable = true;
 
@@ -446,7 +397,34 @@ in {
         ##### Hubstaff ######
         #######################
         # Auto-switch Hubstaff project when switching tmux sessions
-        set-hook -g client-session-changed 'run-shell "/bin/sh /Users/dmitry/dev/nmd/nixhome/tmux-hs-hook.sh #{session_name} #{client_name}"'
+        set-hook -g client-session-changed 'run-shell "/bin/sh ${../scripts/tmux/hs-hook.sh} #{session_name} #{client_name}"'
+
+        ###############################
+        ##### Framework Status Bar ####
+        ###############################
+        # 2-row status bar — top row shows session + windows, bottom row shows
+        # framework status-right modules. Matches the original Dracula layout.
+        set -g status              2
+        set -g status-style        'bg=${theme.palette.surface_2},fg=${theme.palette.fg}'
+        set -g status-interval     5
+        set -g status-left-length  100
+        set -g status-right-length 300
+
+        set-environment -g TMUX_WIDGET_WEATHER_CITY  "NYC"
+        set-environment -g TMUX_WIDGET_WEATHER_UNIT  "u"
+
+        set -g status-left  '${framework.composeBar [ "session" ]}'
+        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" ]}'
+
+        set -g window-status-format         '${framework.windowStyle.format}'
+        set -g window-status-current-format '${framework.windowStyle.currentFormat}'
+        set -g window-status-separator      '${framework.windowStyle.separator}'
+
+        # Row layout:
+        #   format[0] (top)    : status-left + windows  (status-right OMITTED)
+        #   format[1] (bottom) : status-right centered
+        set -g status-format[0] '#[align=left]#{T;=/#{status-left-length}:status-left}#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
+        set -g status-format[1] '#[align=centre]#{T;=/#{status-right-length}:status-right}'
 
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'
@@ -506,63 +484,7 @@ in {
         set-environment -g TMUXP_FZF_LAUNCH_KEY 'T'
       '';
     }
-    {
-      plugin = dracula;
-      extraConfig = ''
-        # Dracula settings
-        ###
-        # Dracula Plugins: battery, cpu-usage, git, gpu-usage, ram-usage, tmux-ram-usage, network, network-bandwidth, network-ping, ssh-session, attached-clients, network-vpn, weather, time, mpc, spotify-tui, kubernetes-context, synchronize-panes
-        # Now Playing Doc: https://github.com/spywhere/now-playing/blob/master/README.md
-        # Dracula Settings: https://draculatheme.com/tmux
-        # Unicode Symbols: https://symbl.cc/en/unicode/table/#miscellaneous-symbols
-
-
-        # set -g @dracula-plugins "window time" # it can accept `hostname` (full hostname), `session`, `shortname` (short name), `smiley`, `window`, or any character.
-        # set -g @dracula-plugins "weather time" # it can accept `hostname` (full hostname), `session`, `shortname` (short name), `smiley`, `window`, or any character.
-        set -g @dracula-show-left-icon session
-        set -g @dracula-time-format '%R %Z'
-        set -g @dracula-show-timezone true
-        set -g @dracula-show-powerline false
-        set -g @dracula-show-flags true
-        set -g @dracula-left-icon-padding 1
-        set -g @dracula-show-empty-plugins false
-
-        set -g @dracula-network-public-ip-label "ⓦ"
-
-
-        # Weather
-        set -g @dracula-fixed-location "NYC"
-        set -g @dracula-show-fahrenheit true
-
-        # 2-row status
-        set -g status 2
-
-        # ROW 1 (TOP)
-        set -g status-format[0] '#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
-
-        # ROW 2 (BOTTOM - Dracula plugins)
-        set -g status-format[1] "#[align=centre]#[range=right]#{E:status-right}#[norange]"
-
-        ### Status Plugins
-
-
-        set -g @dracula-plugins "${tmuxDraculaPlugins.public}"
-
-
-        # Cycle Dracula plugins between two sets
-        bind P run-shell '
-        current="$(tmux show -gv @dracula-plugins)"
-        if [ "$current" = "${tmuxDraculaPlugins.private}" ]; then
-          tmux set -g @dracula-plugins "${tmuxDraculaPlugins.public}"
-        else
-          tmux set -g @dracula-plugins "${tmuxDraculaPlugins.private}"
-        fi
-
-        # re-run Dracula init so it picks up new plugins
-        tmux run-shell ${dracula}/share/tmux-plugins/dracula/dracula.tmux
-        '
-      '';
-    }
+    # Dracula plugin entry removed — framework owns the status bar.
     better-mouse-mode
     sensible
     {

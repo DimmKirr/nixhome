@@ -1,0 +1,1 @@
+#[fg=default]#[fg=default]#(<script:snapshot-tick>)#[default]

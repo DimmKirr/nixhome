@@ -15,3 +15,12 @@ tmp/
 local.nix
 *-local.nix
 .devcell.toml
+
+# linux-builder accidentally writes keys here if start script runs from repo cwd
+keys/
+
+# VM disk images — managed by nix-darwin linux-builder at /var/lib/linux-builder/
+*.qcow2
+*.img
+*.iso
+*.raw

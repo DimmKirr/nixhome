@@ -1,0 +1,1 @@
+#[fg=#f38ba8]#[fg=#11111b,bg=#f38ba8]󱦘 #[fg=#cdd6f4,bg=#313244] #(<script:cpu>) #[fg=#313244]#[default]

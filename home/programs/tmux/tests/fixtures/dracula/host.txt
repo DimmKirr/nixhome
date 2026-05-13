@@ -1,0 +1,1 @@
+#[fg=#BD93F9]#[fg=#191A21,bg=#BD93F9]󰒋 #[fg=#F8F8F2,bg=#21222C] #H #[fg=#21222C]#[default]

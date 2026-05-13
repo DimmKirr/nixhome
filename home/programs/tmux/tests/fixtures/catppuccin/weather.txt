@@ -1,0 +1,1 @@
+#[fg=#89dceb]#[fg=#cdd6f4,bg=#89dceb] #(<script:weather>) #[fg=#89dceb]#[default]

@@ -17,6 +17,8 @@ let
     nixd
     ripgrep
     htop
+    watch
+    gnutar
     tmux
     direnv
     nixfmt-rfc-style

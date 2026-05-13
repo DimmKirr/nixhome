@@ -1,0 +1,1 @@
+#[fg=#94e2d5]#[fg=#11111b,bg=#94e2d5]󰘔 #[fg=#cdd6f4,bg=#313244] #{pane_current_command} #[fg=#313244]#[default]

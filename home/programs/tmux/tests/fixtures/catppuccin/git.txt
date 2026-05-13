@@ -1,0 +1,1 @@
+#[fg=#f5c2e7]#[fg=#11111b,bg=#f5c2e7] #[fg=#cdd6f4,bg=#313244] #(<script:git> #{pane_current_path}) #[fg=#313244]#[default]

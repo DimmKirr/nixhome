@@ -1,0 +1,1 @@
+#[fg=#FFB86C]#[fg=#191A21,bg=#FFB86C]󰉋 #[fg=#F8F8F2,bg=#21222C] #{b:pane_current_path} #[fg=#21222C]#[default]

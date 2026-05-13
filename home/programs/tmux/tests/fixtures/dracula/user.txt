@@ -1,0 +1,1 @@
+#[fg=#8BE9FD]#[fg=#191A21,bg=#8BE9FD] #[fg=#F8F8F2,bg=#21222C] #(whoami) #[fg=#21222C]#[default]

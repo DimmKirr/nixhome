@@ -1,0 +1,1 @@
+#[fg=#FF79C6]#[fg=#191A21,bg=#FF79C6]󰖩 #[fg=#F8F8F2,bg=#21222C] #(<script:network>) #[fg=#21222C]#[default]

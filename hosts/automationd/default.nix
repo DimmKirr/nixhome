@@ -1,5 +1,6 @@
 {
   config,
+  lib,
   pkgs,
   inputs,
   pkgsUnstable,
@@ -23,6 +24,16 @@ in {
 
   # Karabiner Elements 15 is broken https://github.com/LnL7/nix-darwin/issues/1041
   nixpkgs.overlays = [
+    # mas overlay — nixpkgs 25.05 ships mas 2.2.2 which Apple broke when installd
+    # was hardened in macOS 14.8.2+/15.7.2+/26.1+. Pull current mas (7.x) from
+    # nixpkgs-unstable. Tracking: nix-darwin#1722, mas-cli#1221.
+    (final: _prev: {
+      mas = (import inputs.nixpkgs-unstable {
+        inherit (final.stdenv.hostPlatform) system;
+        config.allowUnfree = true;
+      }).mas;
+    })
+
     #    # karabiner
     #    (self: super: {
     #      karabiner-elements = super.karabiner-elements.overrideAttrs (old: {
@@ -49,22 +60,56 @@ in {
     enable = true;
     package = pkgs.nix;
 
-    gc = {
-      automatic = true;
-      interval = {
-        Weekday = 6; # Friday
-
-
-
-        Hour = 3; # 3 AM
-        Minute = 0;
+    # Sized for Apple M4 Pro / 13-core / 48 GB host — leaves 3 cores & ~32 GB for macOS.
+    linux-builder = {
+      enable = true;
+      ephemeral = false;
+      maxJobs = 4;
+      config = {
+        virtualisation = {
+          darwin-builder.diskSize = 100 * 1024;  # 100 GB (sparse)
+          darwin-builder.memorySize = 16 * 1024; # 16 GB (ballooned when idle)
+          cores = 8;  # qemu mach-virt caps at 8 vCPUs
+        };
+        # Built-in nix.gc disabled — custom systemd service below keeps exactly 2 generations.
+        nix.gc.automatic = false;
+        systemd.services.nix-gc-keep-2 = {
+          description = "Keep 2 system generations and GC the nix store";
+          serviceConfig.Type = "oneshot";
+          script = ''
+            ${pkgs.nix}/bin/nix-env \
+              --profile /nix/var/nix/profiles/system \
+              --delete-generations +2 || true
+            ${pkgs.nix}/bin/nix-collect-garbage
+          '';
+        };
+        systemd.timers.nix-gc-keep-2 = {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnCalendar = "daily";
+            Persistent = true;
+            RandomizedDelaySec = "30m";
+          };
+        };
+        # mkForce overrides both the nix-builder-vm profile defaults (3 GB)
+        # and the host's nix.settings auto-forwarded into the VM.
+        nix.settings = {
+          keep-derivations = lib.mkForce false;
+          min-free = lib.mkForce 53687091200;   # 50 GB free — triggers GC
+          max-free = lib.mkForce 64424509440;   # 60 GB free — GC stops here
+        };
       };
-      options = "--delete-older-than 30d";
     };
+
+    # Built-in GC disabled — custom launchd daemon below keeps exactly 2 generations.
+    gc.automatic = false;
 
     settings =
       {
         "auto-optimise-store" = false;
+        "keep-derivations" = false;
+        "min-free" = 5368709120;  # 5 GB
+        "max-free" = 10737418240; # 10 GB
         "extra-experimental-features" = [
           "nix-command"
           "flakes"
@@ -89,14 +134,38 @@ in {
     gnupg.agent.enable = true;
   };
 
+  # Keep 2 system generations + GC. Runs daily at 3 AM.
+  launchd.daemons.nix-gc-keep-2 = {
+    serviceConfig = {
+      ProgramArguments = [
+        "/bin/sh" "-c"
+        ''
+          /nix/var/nix/profiles/default/bin/nix-env \
+            --profile /nix/var/nix/profiles/system \
+            --delete-generations +2 || true
+          /nix/var/nix/profiles/default/bin/nix-collect-garbage
+        ''
+      ];
+      StartCalendarInterval = [{ Hour = 3; Minute = 0; }];
+      StandardOutPath = "/var/log/nix-gc.log";
+      StandardErrorPath = "/var/log/nix-gc.log";
+    };
+  };
+
+
   # Used for backwards compatibility, please read the changelog before changing.
   # $ darwin-rebuild changelog
   system.stateVersion = 5;
 
   # Install fonts
   #fonts.fontDir.enable = true;
-  fonts.packages = [
-    pkgs.monaspace
+  fonts.packages = with pkgs; [
+    monaspace
+    # Nerd Font variants — required for tmux/starship/Ghostty status bar glyphs.
+    # symbols-only is the safety net: even if primary font lacks coverage,
+    # terminal falls back to it for icon ranges.
+    nerd-fonts.monaspace
+    nerd-fonts.symbols-only
   ];
 
   # Use homebrew to install casks and Mac App Store apps

@@ -1,0 +1,1 @@
+#[fg=#{?client_prefix,#f38ba8,#a6e3a1}]#[fg=#11111b,bg=#{?client_prefix,#f38ba8,#a6e3a1}] #[fg=#cdd6f4,bg=#313244] #S #[fg=#313244]#[default]

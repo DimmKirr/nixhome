@@ -1,0 +1,1 @@
+#[fg=#74c7ec]#[fg=#11111b,bg=#74c7ec]󰣀 #[fg=#cdd6f4,bg=#313244] #(<script:attached-clients>) #[fg=#313244]#[default]

@@ -3,66 +3,77 @@
   enable = true;
 
   settings = {
-    # Left: dir → git_branch → git_status → direnv → character
+    # Dracula palette — https://draculatheme.com
+    # bg=#282A36 fg=#F8F8F2 muted=#6272A4 cyan=#8BE9FD green=#50FA7B
+    # orange=#FFB86C pink=#FF79C6 purple=#BD93F9 red=#FF5555 yellow=#F1FA8C
+
+    # Left: dir → git_branch → git_status → character
     format = "$directory$git_branch$git_status$character";
-    # Right: ENV var (custom_env_name) → context (user@host, ssh/root only) → cmd_duration
+    # Right: ENV var → context (user@host on SSH/root) → cmd_duration
     right_format = "$env_var$username$hostname$cmd_duration";
     add_newline = false;
 
     character = {
-      success_symbol = "[❯](bold #FF6AC1)"; # magenta, matches p10k
-      error_symbol   = "[❯](bold #FF5C57)"; # red, matches p10k
+      success_symbol = "[❯](bold #FF79C6)"; # pink
+      error_symbol   = "[❯](bold #FF5555)"; # red
     };
 
     directory = {
-      style             = "bold #57C7FF"; # blue, matches p10k
-      truncation_length = 1;              # truncate_to_last — only show current segment
+      style             = "bold #BD93F9"; # purple
+      truncation_length = 1;
       truncate_to_repo  = false;
       format            = "[$path]($style) ";
     };
 
     git_branch = {
-      format = "[$branch]($style)";
-      style  = "242";      # grey, matches p10k POWERLEVEL9K_VCS_FOREGROUND
-      symbol = "";         # no branch icon, matches p10k POWERLEVEL9K_VCS_BRANCH_ICON=
+      format = "[$branch]($style) ";
+      style  = "#50FA7B";  # green
+      symbol = "";
     };
 
     git_status = {
-      style    = "242";
-      ahead    = ":⇡";
-      behind   = ":⇣";
-      diverged = ":⇡⇣";
+      style       = "#6272A4"; # muted
+      format      = "([$all_status$ahead_behind]($style) )";
+      conflicted  = "[=](#FF5555)";   # red
+      ahead       = "[⇡](#50FA7B)";   # green
+      behind      = "[⇣](#FFB86C)";   # orange
+      diverged    = "[⇡⇣](#FF5555)";
+      up_to_date  = "";
+      untracked   = "[?](#F1FA8C)";   # yellow
+      stashed     = "[\\$](#BD93F9)"; # purple
+      modified    = "[!](#FFB86C)";   # orange
+      staged      = "[+](#50FA7B)";   # green
+      renamed     = "[»](#8BE9FD)";   # cyan
+      deleted     = "[✘](#FF5555)";   # red
     };
 
     cmd_duration = {
-      min_time            = 5000; # 5s threshold, matches p10k COMMAND_EXECUTION_TIME_THRESHOLD
-      format              = "[$duration]($style)";
-      style               = "bold #F3F99D"; # yellow, matches p10k
-      show_milliseconds   = false;
+      min_time          = 5000;
+      format            = "[$duration]($style) ";
+      style             = "bold #F1FA8C"; # yellow
+      show_milliseconds = false;
     };
 
-    # Replaces p10k custom_env_name (echo $ENV) — shown on right when $ENV is set
     env_var = {
       ENV = {
         variable = "ENV";
         format   = "[$env_value]($style) ";
-        style    = "bold yellow";
+        style    = "bold #F1FA8C"; # yellow
         disabled = false;
       };
     };
 
-    # Replaces p10k context — grey user@host, hidden by default, shown for root/SSH
     username = {
       format      = "[$user]($style)";
-      style_user  = "242";
-      style_root  = "bold #F1F1F0";
+      style_user  = "#6272A4"; # muted
+      style_root  = "bold #FF5555"; # red — danger
       show_always = false;
       disabled    = false;
     };
 
     hostname = {
       format   = "[@$hostname]($style) ";
-      style    = "242";
+      style    = "#8BE9FD"; # cyan
       ssh_only = true;
       disabled = false;
     };

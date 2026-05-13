@@ -1,0 +1,1 @@
+#[fg=#FF5555]#[fg=#191A21,bg=#FF5555]󰍛 #[fg=#F8F8F2,bg=#21222C] #(<script:ram>) #[fg=#21222C]#[default]

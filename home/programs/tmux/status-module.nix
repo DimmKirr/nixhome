@@ -25,14 +25,26 @@
   textFg,
   textBg,
   style,
+  # Optional: when true, wrap the rendered fragment in an emptiness check so the
+  # widget collapses to nothing when its `text` evaluates to empty (e.g. shell
+  # widgets with no music playing, weather offline). Defaults to false so static
+  # widgets — session/host/date-time — don't pay the double-evaluation cost.
+  # (Ticket: tmux-widgets-emit-stray-escapes-when-empty)
+  skipWhenEmpty ? false,
   ...   # ignore widget-only metadata (cacheSeconds, _invisible, etc.)
 }:
 let
   s = separators;
 
-  # tmux color-escape helpers — single source of truth so we never typo `#[fg=…]`
+  # tmux color-escape helpers — single source of truth so we never typo `#[fg=…]`.
+  # IMPORTANT: emit fg and bg as TWO separate `#[...]` directives, not as
+  # combined `#[fg=…,bg=…]`. tmux's `#{?cond,then,else}` parser splits on
+  # commas; commas inside `#[…]` style attributes confuse that parser and
+  # break our `skipWhenEmpty` wrappers (which are `#{?#{==:…,…},…,…}` —
+  # commas inside the rendered block would be miscounted, truncating the
+  # conditional). Matches the pre-framework Dracula plugin's pattern.
   fg     = c: "#[fg=${c}]";
-  fgBg   = c: b: "#[fg=${c},bg=${b}]";
+  fgBg   = c: b: "#[fg=${c}]#[bg=${b}]";
   reset  = "#[default]";
 
   # When icon is empty, collapse to single-tone (skip the icon block + middle
@@ -58,7 +70,24 @@ let
   rendered = {
     inherit twoTone flat minimal powerline;
   }.${style};
+
+  # Empty-skip wrapper. tmux's `#{?#{==:A,B},then,else}` compares two strings;
+  # if `text` contains a `#()` command, tmux evaluates it before comparing,
+  # so an empty command output collapses the entire block.
+  #
+  # IMPORTANT: pass the *bare* `#()` (no surrounding whitespace) into `#{==:…}`,
+  # otherwise tmux's parser treats the padding spaces as part of the operand
+  # and the comparison NEVER returns equal-to-empty (so the wrapper either
+  # always renders, or — depending on tmux version — silently collapses
+  # everything). The padded version stays in `${rendered}` for visual spacing.
+  # This matches the pre-framework Dracula plugin's working pattern.
+  # (Ticket: tmux-widgets-emit-stray-escapes-when-empty)
+  bareCmd = lib.removeSuffix " " (lib.removePrefix " " text);
+  guarded =
+    if skipWhenEmpty
+    then "#{?#{==:${bareCmd},},,${rendered}}"
+    else rendered;
 in
   assert lib.assertMsg (rendered != null)
     "status-module: unknown style '${style}' (must be twoTone | flat | minimal | powerline)";
-  rendered
+  guarded

@@ -1,14 +1,14 @@
 # now-playing — current music track via DimmKirr/tmux-now-playing.
 #
 # Pinned to the `feature/add-media-control` branch — that branch emits empty
-# output when no player is running. We wrap music.sh in a tiny shell script
-# that:
-#   - emits nothing when output is empty (cyan block disappears entirely)
-#   - emits a tmux-formatted cyan block with the track text otherwise
+# output when no player is running. The wrapper script emits plain text
+# (no color escapes); the framework composer draws the cyan bg block in
+# the standard twoTone shape, matching pre-framework Dracula visuals.
 #
-# Composer style = "minimal" so the framework doesn't draw its own always-on
-# block — the wrapper draws colors inline via #[fg=...,bg=...] escapes which
-# tmux honors inside #() output.
+# `skipWhenEmpty = true` makes the composer wrap the rendered fragment in
+# `#{?#{==:#(...),},,...}` — so when music.sh returns empty, the whole
+# block (including bg) collapses to nothing.
+# (Ticket: tmux-widgets-emit-stray-escapes-when-empty)
 { lib, pkgs, palette, icons, style }:
 let
   base = import ./_base.nix { inherit lib; };
@@ -28,8 +28,8 @@ let
   musicScript = "${nowPlayingPlugin}/share/tmux-plugins/tmux-now-playing/scripts/music.sh";
 
   scriptText = lib.replaceStrings
-    [ "@MUSIC_SCRIPT@" "@FG@" "@BG@" ]
-    [ musicScript palette.iconFgDefault palette.sky ]
+    [ "@MUSIC_SCRIPT@" ]
+    [ musicScript ]
     (builtins.readFile ./scripts/now-playing.sh);
 
   wrapped = pkgs.writeShellApplication {
@@ -39,7 +39,10 @@ let
   };
 in
 base.defaults palette // {
-  icon  = "";
-  text  = "#(${wrapped}/bin/tmux-widget-now-playing)";
-  style = "minimal";
+  icon   = "";
+  iconBg = palette.sky;     # Dracula cyan (#8BE9FD) — matches pre-framework Dracula now-playing block
+  iconFg = palette.crust;   # dark text (#191A21) on cyan bg
+  text   = " #(${wrapped}/bin/tmux-widget-now-playing) ";
+  inherit style;            # use theme style (twoTone) so the composer draws the bg block
+  skipWhenEmpty = true;     # collapse the whole block when no music is playing
 }

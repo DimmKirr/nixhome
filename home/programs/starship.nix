@@ -10,7 +10,13 @@
     # Left: dir → git_branch → git_status → character
     format = "$directory$git_branch$git_status$character";
     # Right: ENV var → context (user@host on SSH/root) → cmd_duration
-    right_format = "$env_var$username$hostname$cmd_duration";
+    # username + hostname removed from the right-prompt — they were
+    # surfacing `dmitry@automationd` on every prompt line (1Password SSH
+    # agent / passthrough sets SSH_CONNECTION even on local shells,
+    # tripping starship's ssh_only=true and show_always=false defaults).
+    # Re-add `$username$hostname` here when you want it back on actual
+    # remote sessions.
+    right_format = "$env_var$cmd_duration";
     add_newline = false;
 
     character = {

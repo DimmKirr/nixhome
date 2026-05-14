@@ -2,7 +2,22 @@
 
   # Universal tmux theming framework — palettes, widgets, composer.
   # User-facing knob lives in ./theme.nix.
-  theme     = import ./theme.nix { inherit lib; preset = "dracula"; };
+  #
+  # nerdFonts = false (default for portability) — uses BMP-Unicode glyphs that
+  # render on every system font: ☁ ⛅ ☀ ❄ ⚡ etc. No drift between tmux's
+  # column accounting and the terminal's actual rendering, so SSH-in from
+  # Termius/JuiceSSH/PuTTY works without the phantom-bar / column-overflow
+  # issues Nerd Font PUA glyphs cause (PUA chars have wcwidth()=1 but
+  # render as 2-cell icons → status-right under-counted → layout corruption
+  # on narrow clients).
+  #
+  # Flip to `true` ONLY if every client that attaches has a Nerd Font:
+  #   nerdFonts = true;  # → rich icons (󰖐 󰖕 󰖙 …) + powerline separators
+  theme     = import ./theme.nix {
+    inherit lib;
+    preset    = "dracula";
+    nerdFonts = false;
+  };
   framework = import ./tmux { inherit lib pkgs theme; };
 
   # Silent auto-save tick. Embedded in status-right so it fires on every
@@ -278,7 +293,25 @@ in {
         #######################
         # Enable Pane name
         set -g pane-border-status top
-        set -g pane-border-format '#{pane_index} #{?@label,#[fg=white]#{@label}#[default] | ,}#{pane_title}'
+        # Subtle line + muted text — matches original Dracula's quiet pane
+        # divider (overlay_2 = #6272A4 "comment" grey-blue). Active pane
+        # picks up the brighter mauve so it's still visually identifiable
+        # without shouting.
+        set -g pane-border-style        'fg=${theme.palette.overlay_0}'
+        set -g pane-active-border-style 'fg=${theme.palette.overlay_2}'
+        # Layout: "<index> <@label> | <pane_title>".
+        #   @label      — custom name set via "Rename Pane" (prefix + > → n)
+        #   pane_title  — OSC-set terminal title (Claude's "✳ Claude …",
+        #                 starship's shortened cwd, vim's filename, etc.)
+        # The pane_title slot is suppressed when it equals #{host_short} —
+        # tmux initializes new panes to the hostname, so this hides the
+        # uninformative default until something explicitly sets a title.
+        # Truncated to 40 chars so the border row width stays stable on
+        # resize (prevents shifting from MC's long "mc [user@host]:cwd").
+        # Text uses overlay_2 (muted) instead of white — pre-framework
+        # Dracula rendered border text in the comment-grey shade, not bright
+        # white. Keeps the divider quiet in peripheral vision.
+        set -g pane-border-format '#{pane_index} #{?@label,#[fg=${theme.palette.overlay_2}]#{@label}#[default] | ,}#{?#{!=:#{pane_title},#{host_short}},#[fg=${theme.palette.overlay_2}]#{=40:pane_title}#[default],}'
 
         # Change Pane Menu with rename
         bind-key -n MouseDown3Pane display-menu -T "Pane Menu" -x R -y P \
@@ -406,15 +439,38 @@ in {
         # framework status-right modules. Matches the original Dracula layout.
         set -g status              2
         set -g status-style        'bg=${theme.palette.surface_2},fg=${theme.palette.fg}'
+        # Match status-bg so command-prompts/menus don't pop in tmux's
+        # default yellow-on-black. (Ticket: tmux-message-style-defaults-to-yellow-black)
+        set -g message-style       'bg=${theme.palette.surface_2},fg=${theme.palette.fg}'
         set -g status-interval     5
         set -g status-left-length  100
-        set -g status-right-length 300
+        # 100 (was 300). Combined with #{E:status-right} on format[1] this
+        # avoids mid-escape truncation on narrow thin-client terminals.
+        # (Ticket: tmux-thin-ssh-client-status-bar-distortion)
+        set -g status-right-length 100
+
+        # bold (not reverse) — `reverse` swaps fg/bg per cell, which flickers
+        # on thin SSH clients (Termius, JuiceSSH, mosh). bold matches the
+        # pre-framework Dracula behavior.
+        # (Ticket: tmux-thin-ssh-client-status-bar-distortion)
+        set -g window-status-activity-style bold
+        set -g window-status-bell-style     bold
 
         set-environment -g TMUX_WIDGET_WEATHER_CITY  "NYC"
         set-environment -g TMUX_WIDGET_WEATHER_UNIT  "u"
 
         set -g status-left  '${framework.composeBar [ "session" ]}'
+        # Full widget composition restored after _cache.nix hash-key fix —
+        # cache invalidates automatically when widget scripts change, so
+        # the stale-PUA-glyph regression after `nerdFonts` flips is gone.
+        # If thin-client distortion returns, revert to `[ "date-time" ]`
+        # and inspect 97-widget-cache.txt + the CACHE/* checks in 99-checks.txt.
         set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" ]}'
+        # Periodic auto-save tick — MUST come after the `set -g status-right`
+        # above, otherwise that overwrite clobbers this appended #() command.
+        # Previously lived inside a plugin's extraConfig where it ran BEFORE
+        # the main block. (Ticket: tmux-snapshot-tick-silently-disabled)
+        set -ag status-right '#(${snapshotTick})'
 
         set -g window-status-format         '${framework.windowStyle.format}'
         set -g window-status-current-format '${framework.windowStyle.currentFormat}'
@@ -426,8 +482,12 @@ in {
         # status-left wrapped in `range=left` so right-click on NMD fires
         # MouseDown3StatusLeft → Session Menu. status-right wrapped in
         # `range=right` so clicks on row 1 fire MouseDown3StatusRight.
+        # format[1] uses `#{E:status-right}` (plain evaluation) instead of
+        # `#{T;=/#{status-right-length}:status-right}` (tmux-3.0-only
+        # truncation directive that mangles on thin clients / older tmux).
+        # (Ticket: tmux-thin-ssh-client-status-bar-distortion)
         set -g status-format[0] '#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
-        set -g status-format[1] '#[align=centre]#[range=right]#{T;=/#{status-right-length}:status-right}#[norange]'
+        set -g status-format[1] '#[align=centre]#[range=right]#{E:status-right}#[norange]'
 
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'
@@ -492,8 +552,11 @@ in {
     sensible
     {
       # tmux-snapshot save/auto-save. Replaces tmux-resurrect + tmux-continuum.
-      # Attached to `yank` (the last plugin) so this config runs AFTER
-      # Dracula sets `status-right`, letting `set -ag` append cleanly.
+      # Bindings only — the periodic-save `set -ag status-right '#(snapshotTick)'`
+      # was moved to the main extraConfig block (right after `set -g status-right`)
+      # because the order of generated tmux.conf put this plugin's extraConfig
+      # BEFORE the framework's `set -g status-right`, causing the appended
+      # tick to be clobbered. See Ticket: tmux-snapshot-tick-silently-disabled.
       plugin = yank;
       extraConfig = ''
         # How often the silent tick actually fires save (minutes).
@@ -515,11 +578,6 @@ in {
         # already-live sessions are skipped, never disturbed.
         bind C-r run-shell '${snapshotRestoreCurrent} "#S"'
         bind M-r run-shell '${snapshotRestore}'
-
-        # Periodic auto-save: status-right interpolation runs every
-        # status-interval (15s default). The script no-ops unless the
-        # configured interval has elapsed since @snapshot-last-save.
-        set -ag status-right '#(${snapshotTick})'
       '';
     }
 

@@ -12,8 +12,13 @@
   mantle    = "#1E1F29";
   surface_0 = "#21222C";
   surface_1 = "#282A36";  # = bg
-  surface_2 = "#373844";
-  overlay_0 = "#44475A";  # selection
+  # surface_2 = upstream Dracula "Current Line" (#44475A). The framework uses
+  # this slot for status-bg; we deliberately keep it equal to overlay_0 to
+  # match the pre-framework Dracula plugin's rendered status-style. The
+  # Catppuccin palette has its own surface_2; this only affects Dracula preset.
+  # (Ticket: tmux-dracula-palette-diverges-from-upstream)
+  surface_2 = "#44475A";
+  overlay_0 = "#44475A";  # selection — Dracula's "Current Line"
   overlay_1 = "#54576C";
   overlay_2 = "#6272A4";  # comment
   subtext_0 = "#BFBFBF";

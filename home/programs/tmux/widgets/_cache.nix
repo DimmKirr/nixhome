@@ -15,6 +15,15 @@
 {
   # Returns a derivation that, when executed, prints either fresh or cached output.
   wrap = { name, seconds, script }:
+    let
+      # Tie the cache filename to the script's nix-store hash so a content
+      # change (e.g. nerdFonts true→false) invalidates the cache. Without
+      # this, the cache wrapper sees a "fresh" file (age < max_age) and
+      # serves stale PUA output across rebuilds. The 8-char prefix of the
+      # store hash is unique enough in practice.
+      # (Ticket: weather widget served stale PUA glyphs after nerdFonts flip)
+      contentKey = builtins.substring 0 8 (baseNameOf "${script}");
+    in
     pkgs.writeShellApplication {
       name = "${name}-cached";
       runtimeInputs = [ pkgs.coreutils ];
@@ -23,7 +32,10 @@
         # Falls back to /tmp only if $HOME is unset (shouldn't happen).
         cache_dir="''${XDG_CACHE_HOME:-''${HOME:-/tmp}/.cache}/tmux-widget"
         mkdir -p "$cache_dir"
-        cache_file="$cache_dir/${name}"
+        # Filename includes a content-derived suffix — when the underlying
+        # script changes, the cache path changes, so stale output from prior
+        # builds is naturally orphaned (not deleted; just no longer read).
+        cache_file="$cache_dir/${name}-${contentKey}"
         max_age=${toString seconds}
 
         # Refresh if missing OR older than max_age. `date -r FILE +%s` reads the

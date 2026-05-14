@@ -18,5 +18,12 @@
     textFg = palette.fg;
     textBg = palette.surface_0;
     cacheSeconds = 0;             # 0 = not cached (static or fast widget)
+    # skipWhenEmpty: shell-output widgets that can return empty (no music,
+    # weather offline, no k8s context, no git branch) opt into this so the
+    # composer wraps the rendered fragment in #{?#{==:<text>,},,<rendered>} —
+    # tmux re-runs the #() to check emptiness, then emits the block only when
+    # non-empty. Avoids stray #[fg=…]…#[default] escapes on empty widgets.
+    # (Ticket: tmux-widgets-emit-stray-escapes-when-empty)
+    skipWhenEmpty = false;
   };
 }

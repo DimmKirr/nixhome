@@ -7,6 +7,12 @@
 #   separators — glyph set (round, sharp, soft, none)
 #   icons      — icon vocabulary (nerdFont, ascii, emoji, none)
 #
+# Plus one portability switch:
+#   nerdFonts  — when false, force PUA-free output (ascii icons + non-PUA
+#                separators). Use for SSH-in from Termius / JuiceSSH / PuTTY
+#                / any client without a Nerd Font installed. Overrides icons
+#                and separators if they would emit PUA glyphs.
+#
 # Set `preset` to pick all four. Override any individual dial by setting its
 # attribute to a non-null value.
 {
@@ -17,6 +23,9 @@
   style      ? null,
   separators ? null,
   icons      ? null,
+  # Portability switch — default false so the config is SSH-safe by default.
+  # Flip to true on machines where a Nerd Font is installed for the local UI.
+  nerdFonts  ? false,
 }:
 let
   palettes = import ./tmux/palettes;
@@ -42,16 +51,27 @@ let
       "theme.nix: unknown preset '${preset}'. Known: ${toString (lib.attrNames presets)}";
     presets.${preset};
 
-  # Resolve each dial: explicit override wins, else preset's default.
-  resolved = {
-    palette    = if palette    != null then palette    else presetDefaults.palette;
-    style      = if style      != null then style      else presetDefaults.style;
-    separators = if separators != null then separators else presetDefaults.separators;
-    icons      = if icons      != null then icons      else presetDefaults.icons;
+  # Layered resolution (lowest precedence first):
+  #   1. preset defaults
+  #   2. nerdFonts=false compat overrides   (only when active)
+  #   3. explicit per-dial user overrides   (only when non-null)
+  #
+  # `//` is right-biased so later layers win. The compat layer sits between
+  # the preset and explicit overrides so a user who *intentionally* sets
+  # `separators = "round"` keeps PUA even with `nerdFonts = false`.
+  compatOverrides = lib.optionalAttrs (!nerdFonts) {
+    icons      = "ascii";   # drop nerdFont PUA glyphs
+    separators = "none";    # drop powerline PUA glyphs (U+E0B0…)
   };
+
+  explicitOverrides = lib.filterAttrs (_: v: v != null) {
+    inherit palette style separators icons;
+  };
+
+  resolved = presetDefaults // compatOverrides // explicitOverrides;
 in
 {
-  inherit preset;
+  inherit preset nerdFonts;
   inherit (resolved) palette style separators icons;
 
   # Convenience: validate enum-ish dials at eval time

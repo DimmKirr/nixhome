@@ -423,8 +423,11 @@ in {
         # Row layout:
         #   format[0] (top)    : status-left + windows  (status-right OMITTED)
         #   format[1] (bottom) : status-right centered
-        set -g status-format[0] '#[align=left]#{T;=/#{status-left-length}:status-left}#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
-        set -g status-format[1] '#[align=centre]#{T;=/#{status-right-length}:status-right}'
+        # status-left wrapped in `range=left` so right-click on NMD fires
+        # MouseDown3StatusLeft → Session Menu. status-right wrapped in
+        # `range=right` so clicks on row 1 fire MouseDown3StatusRight.
+        set -g status-format[0] '#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
+        set -g status-format[1] '#[align=centre]#[range=right]#{T;=/#{status-right-length}:status-right}#[norange]'
 
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'

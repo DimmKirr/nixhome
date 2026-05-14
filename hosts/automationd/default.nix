@@ -58,58 +58,77 @@ in {
 
   nix = {
     enable = true;
-    package = pkgs.nix;
+    # Latest upstream nix on the macOS host's nix-daemon — keeps daemon protocol
+    # in sync with the VM's daemon so cross-builds don't hit version skew bugs.
+    package = pkgs.nixVersions.latest;
 
-    # Sized for Apple M4 Pro / 13-core / 48 GB host — leaves 3 cores & ~32 GB for macOS.
+    # BOOTSTRAP — bare config so cache.nixos.org's prebuilt VM image substitutes.
+    # Any customization (memory/cores/sudo/GC overrides) forces an aarch64-linux
+    # build that needs an existing linux-builder. After this switch, the VM is
+    # online and we can re-add the full block below in a SECOND switch.
+    #
+    # ephemeral = true: VM disk wiped on every restart so 0-byte/corruption
+    # can't accumulate across macOS sleep/wake. Runtime flag — doesn't trigger
+    # an aarch64-linux build, safe for bootstrap.
     linux-builder = {
       enable = true;
-      ephemeral = false;
-      maxJobs = 4;
-      config = {
-        virtualisation = {
-          darwin-builder.diskSize = 100 * 1024;  # 100 GB (sparse)
-          darwin-builder.memorySize = 16 * 1024; # 16 GB (ballooned when idle)
-          cores = 8;  # qemu mach-virt caps at 8 vCPUs
-        };
-        # Built-in nix.gc disabled — custom systemd service below keeps exactly 2 generations.
-        nix.gc.automatic = false;
-        systemd.services.nix-gc-keep-2 = {
-          description = "Keep 2 system generations and GC the nix store";
-          serviceConfig.Type = "oneshot";
-          script = ''
-            ${pkgs.nix}/bin/nix-env \
-              --profile /nix/var/nix/profiles/system \
-              --delete-generations +2 || true
-            ${pkgs.nix}/bin/nix-collect-garbage
-          '';
-        };
-        systemd.timers.nix-gc-keep-2 = {
-          wantedBy = [ "timers.target" ];
-          timerConfig = {
-            OnCalendar = "daily";
-            Persistent = true;
-            RandomizedDelaySec = "30m";
-          };
-        };
-        # mkForce overrides both the nix-builder-vm profile defaults (3 GB)
-        # and the host's nix.settings auto-forwarded into the VM.
-        nix.settings = {
-          keep-derivations = lib.mkForce false;
-          min-free = lib.mkForce 53687091200;   # 50 GB free — triggers GC
-          max-free = lib.mkForce 64424509440;   # 60 GB free — GC stops here
-        };
-      };
+      ephemeral = true;
+      # 100 GiB sparse qcow2 ceiling (default is 20 GiB). ephemeral=true wipes
+      # the disk on every VM restart, so actual on-disk usage starts at ~0 and
+      # only grows during a build session — "thin" is automatic with qcow2.
+      config.virtualisation.darwin-builder.diskSize = 100 * 1024;
     };
+    # ---- Customized linux-builder config (apply on the SECOND switch) ----
+    # linux-builder = {
+    #   enable = true;
+    #   # ephemeral = true → VM disk wiped on every restart, so 0-byte/corruption
+    #   # can't accumulate across macOS sleep/wake or unclean shutdowns. Cost:
+    #   # ~1–2 min cache repopulation from cache.nixos.org on each VM start.
+    #   # See https://github.com/NixOS/nix/issues/2285 for the underlying race.
+    #   ephemeral = true;
+    #   maxJobs = 4;
+    #   config = {
+    #     nix.package = pkgs.nixVersions.latest;
+    #     virtualisation = {
+    #       darwin-builder.diskSize = 100 * 1024;
+    #       darwin-builder.memorySize = 16 * 1024;
+    #       cores = 8;
+    #     };
+    #     nix.gc.automatic = false;
+    #     systemd.services.nix-gc-keep-1 = {
+    #       description = "Keep only the current system generation and GC the nix store";
+    #       serviceConfig.Type = "oneshot";
+    #       script = ''
+    #         ${pkgs.nix}/bin/nix-env --profile /nix/var/nix/profiles/system --delete-generations +1 || true
+    #         ${pkgs.nix}/bin/nix-collect-garbage
+    #       '';
+    #     };
+    #     systemd.timers.nix-gc-keep-1 = {
+    #       wantedBy = [ "timers.target" ];
+    #       timerConfig = { OnCalendar = "daily"; Persistent = true; RandomizedDelaySec = "30m"; };
+    #     };
+    #     nix.settings = {
+    #       keep-derivations = lib.mkForce false;
+    #       min-free = lib.mkForce 0;
+    #       max-free = lib.mkForce 0;
+    #     };
+    #     security.sudo.extraRules = [{
+    #       users = [ "builder" ];
+    #       commands = [{ command = "ALL"; options = [ "NOPASSWD" ]; }];
+    #     }];
+    #   };
+    # };
 
-    # Built-in GC disabled — custom launchd daemon below keeps exactly 2 generations.
+    # Built-in GC disabled — custom launchd daemon below keeps only the current generation.
     gc.automatic = false;
 
     settings =
       {
         "auto-optimise-store" = false;
         "keep-derivations" = false;
-        "min-free" = 5368709120;  # 5 GB
-        "max-free" = 10737418240; # 10 GB
+        # Auto-GC disabled — see Nix#2285. Daily launchd timer below handles GC.
+        "min-free" = 0;
+        "max-free" = 0;
         "extra-experimental-features" = [
           "nix-command"
           "flakes"
@@ -134,15 +153,18 @@ in {
     gnupg.agent.enable = true;
   };
 
-  # Keep 2 system generations + GC. Runs daily at 3 AM.
-  launchd.daemons.nix-gc-keep-2 = {
+  # Keep only the current system generation + GC. Runs daily at 3 AM.
+  # `--delete-generations +1` keeps just the live one — minimizes disk
+  # pressure so we never approach the threshold that risks GC-vs-build races
+  # (Nix#2285). Rollback is sacrificed in exchange for predictable disk use.
+  launchd.daemons.nix-gc-keep-1 = {
     serviceConfig = {
       ProgramArguments = [
         "/bin/sh" "-c"
         ''
           /nix/var/nix/profiles/default/bin/nix-env \
             --profile /nix/var/nix/profiles/system \
-            --delete-generations +2 || true
+            --delete-generations +1 || true
           /nix/var/nix/profiles/default/bin/nix-collect-garbage
         ''
       ];

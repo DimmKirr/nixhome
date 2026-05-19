@@ -202,6 +202,53 @@
             };
           };
         };
+
+        # devcell container — session user `dmitry` at /home/dmitry.
+        # Mirrors devcell's convention: bare name = x86_64-linux, `-aarch64` = aarch64-linux.
+        # Coexists with the devcell base flake (which owns /opt/devcell).
+        "devcell" = home-manager.lib.homeManagerConfiguration {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          modules = [ ./hosts/devcell/default.nix ];
+          extraSpecialArgs = {
+            inherit nixvim;
+            pkgsUnstable = import inputs.nixpkgs-unstable {
+              system = "x86_64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.12" ];
+              };
+            };
+            pkgsEdge = import inputs.nixpkgs-edge {
+              system = "x86_64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.12" ];
+              };
+            };
+          };
+        };
+
+        "devcell-aarch64" = home-manager.lib.homeManagerConfiguration {
+          pkgs = nixpkgs.legacyPackages.aarch64-linux;
+          modules = [ ./hosts/devcell/default.nix ];
+          extraSpecialArgs = {
+            inherit nixvim;
+            pkgsUnstable = import inputs.nixpkgs-unstable {
+              system = "aarch64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.12" ];
+              };
+            };
+            pkgsEdge = import inputs.nixpkgs-edge {
+              system = "aarch64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.12" ];
+              };
+            };
+          };
+        };
       };
 
     };

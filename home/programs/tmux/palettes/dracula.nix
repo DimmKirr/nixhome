@@ -2,7 +2,7 @@
 # Dracula has 12 distinct colors; missing slots alias to closest match.
 # Aliasing is intentional: widgets get a stable name (palette.mauve, palette.peach)
 # that resolves to *some* Dracula color rather than crashing.
-{
+rec {
   name = "dracula";
 
   # Surfaces (Dracula has fewer surface shades than Catppuccin)
@@ -12,17 +12,15 @@
   mantle    = "#1E1F29";
   surface_0 = "#21222C";
   surface_1 = "#282A36";  # = bg
-  # surface_2 = upstream Dracula "Current Line" (#44475A). The framework uses
-  # this slot for status-bg; we deliberately keep it equal to overlay_0 to
-  # match the pre-framework Dracula plugin's rendered status-style. The
-  # Catppuccin palette has its own surface_2; this only affects Dracula preset.
-  # (Ticket: tmux-dracula-palette-diverges-from-upstream)
-  surface_2 = "#44475A";
   overlay_0 = "#44475A";  # selection — Dracula's "Current Line"
   overlay_1 = "#54576C";
   overlay_2 = "#6272A4";  # comment
   subtext_0 = "#BFBFBF";
   subtext_1 = "#E2E2E2";
+
+  # status-bg slot. Aliased to overlay_0 so they MUST move together — matches
+  # the pre-framework Dracula plugin where window blocks blend into the bar.
+  surface_2 = overlay_0;
 
   # Accents — Dracula has 8 distinct accents, alias the rest.
   # Mapping rationale:
@@ -48,15 +46,15 @@
   blue      = "#8BE9FD";  # alias cyan (no distinct blue in Dracula)
   lavender  = "#6272A4";  # Dracula dark purple / comment
 
-  iconFgDefault = "#191A21";
+  iconFgDefault = crust;
 
   flags = {
     # No icon for active — mauve bg + window number is identifier enough.
-    active   = { icon = "";  color = "#BD93F9"; };  # mauve (matches screen 8)
-    last     = { icon = "·"; color = "#BFBFBF"; };
-    zoomed   = { icon = "Z"; color = "#FFB86C"; };
-    bell     = { icon = "!"; color = "#FF5555"; };
-    activity = { icon = "•"; color = "#F1FA8C"; };
-    silence  = { icon = "~"; color = "#44475A"; };
+    active   = { icon = "";  color = mauve;     };  # matches screen 8
+    last     = { icon = "·"; color = subtext_0; };
+    zoomed   = { icon = "Z"; color = peach;     };
+    bell     = { icon = "!"; color = red;       };
+    activity = { icon = "•"; color = yellow;    };
+    silence  = { icon = "~"; color = overlay_0; };
   };
 }

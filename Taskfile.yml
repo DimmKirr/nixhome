@@ -1,0 +1,634 @@
+version: '3'
+
+# Run from project root:
+#   task debug:theme       — full tmux theme/status dump
+#   task debug:theme-diff  — diff two consecutive dumps (dracula vs current)
+#
+# Dumps land under .context/tmux-theme-dump/ so Claude can read them back.
+
+vars:
+  DUMP_ROOT: '{{.ROOT_DIR}}/.context/tmux-theme-dump'
+
+tasks:
+  debug:theme:
+    desc: Dump full tmux theme/status state (run from inside tmux)
+    cmds:
+      - |
+        set -eu
+
+        if [ -z "${TMUX:-}" ]; then
+          echo "ERROR: not inside a tmux session — run this from inside tmux." >&2
+          exit 1
+        fi
+
+        STAMP=$(date +%Y%m%dT%H%M%S)
+        DEST="{{.DUMP_ROOT}}/$STAMP"
+        LATEST="{{.DUMP_ROOT}}/latest"
+
+        mkdir -p "$DEST"
+
+        # ─── tmux + terminal identity ──────────────────────────────────────
+        tmux -V                                     > "$DEST/01-tmux-version.txt"
+        printf 'TERM=%s\nCOLORTERM=%s\nTERM_PROGRAM=%s\nTERM_PROGRAM_VERSION=%s\nLANG=%s\n' \
+          "${TERM:-}" "${COLORTERM:-}" "${TERM_PROGRAM:-}" "${TERM_PROGRAM_VERSION:-}" "${LANG:-}" \
+                                                    > "$DEST/02-env.txt"
+
+        # ─── effective options (the ground truth) ──────────────────────────
+        tmux show -g                                > "$DEST/10-server-options.txt"
+        tmux show -gw                               > "$DEST/11-window-options.txt"
+
+        # Status-slice — everything that paints the bar
+        tmux show -g | grep -E '^(status|window-status|pane-border|message|mode|set-titles)' \
+                                                    > "$DEST/12-status-slice.txt"
+
+        # The 2-row format strings (one per line — tmux prints status-format[0] and [1])
+        tmux show -g status-format                  > "$DEST/13-status-format.txt"
+
+        # ─── rendered status (what user actually sees) ─────────────────────
+        # The raw template (#() commands NOT expanded)
+        tmux display -p '#{status-left}'            > "$DEST/20-status-left-raw.txt"
+        tmux display -p '#{status-right}'           > "$DEST/21-status-right-raw.txt"
+
+        # Warm tmux's internal #() cache before capturing the expanded
+        # snapshot. `tmux display -p` evaluates `#()` ASYNCHRONOUSLY — the
+        # first call queues the command and returns empty; the result lands
+        # in cache only after the shell command completes. Without warming,
+        # widgets wrapped in `#{?#{==:#(...),},,...}` collapse to empty in
+        # the dump (looks broken in 23-status-right-expanded.txt), even
+        # though the LIVE status bar paints them correctly because its
+        # 5-second refresh cycle keeps the cache warm.
+        # Strategy: extract every `#(cmd)` from the raw template, run each
+        # once via `tmux display -p` to populate the server-side cache,
+        # then sleep one status-interval before the real snapshot.
+        while IFS= read -r cmd; do
+          [ -z "$cmd" ] && continue
+          tmux display -p "$cmd" >/dev/null 2>&1 || true
+        done < <(grep -hoE '#\([^)]+\)' "$DEST/21-status-right-raw.txt" "$DEST/20-status-left-raw.txt" | sort -u)
+        sleep 2
+
+        # The expanded version (#() expanded, escapes resolved) — the bytes painted
+        tmux display -p '#{T:status-left}'          > "$DEST/22-status-left-expanded.txt"
+        tmux display -p '#{T:status-right}'         > "$DEST/23-status-right-expanded.txt"
+
+        # ─── pane border / titles (likely source of dmitry@automationd) ────
+        tmux show -gv pane-border-status            > "$DEST/30-pane-border-status.txt" || true
+        tmux show -gv pane-border-format            > "$DEST/31-pane-border-format.txt" || true
+        # Expand the pane-border-format for the current pane — shows literal painted bytes
+        BORDER_FMT=$(tmux show -gv pane-border-format 2>/dev/null || true)
+        if [ -n "$BORDER_FMT" ]; then
+          tmux display -p "$BORDER_FMT"             > "$DEST/32-pane-border-rendered.txt"
+        fi
+        tmux display -p '#{pane_title}'             > "$DEST/33-pane-title.txt"
+        tmux show -gv set-titles                    > "$DEST/34-set-titles.txt" || true
+        tmux show -gv set-titles-string             > "$DEST/35-set-titles-string.txt" || true
+
+        # ─── window list with titles/cmds (cross-reference) ────────────────
+        tmux list-windows -a \
+          -F '#{session_name}:#{window_index} name="#{window_name}" active=#{window_active} panes=#{window_panes}' \
+                                                    > "$DEST/40-windows.txt"
+        tmux list-panes -a \
+          -F '#{session_name}:#{window_index}.#{pane_index} active=#{pane_active} title="#{pane_title}" cmd=#{pane_current_command} cwd=#{pane_current_path}' \
+                                                    > "$DEST/41-panes.txt"
+        tmux list-clients \
+          -F 'client=#{client_name} tty=#{client_tty} term=#{client_termname} session=#{client_session} w=#{client_width} h=#{client_height}' \
+                                                    > "$DEST/42-clients.txt"
+
+        # ─── key bindings (mouse menus, etc.) ──────────────────────────────
+        tmux list-keys                              > "$DEST/50-keys-all.txt"
+        tmux list-keys -T root                      > "$DEST/51-keys-root.txt"
+        tmux list-keys -T root | grep -E 'Mouse'    > "$DEST/52-keys-mouse.txt" || true
+
+        # ─── generated tmux.conf (home-manager output) ─────────────────────
+        if [ -f "$HOME/.config/tmux/tmux.conf" ]; then
+          cp "$HOME/.config/tmux/tmux.conf"         "$DEST/60-generated-tmux.conf"
+        fi
+
+        # ─── nix-side resolved theme + plugin list ─────────────────────────
+        # Snapshot what's in tree so the dump is self-contained
+        cp {{.ROOT_DIR}}/home/programs/theme.nix    "$DEST/70-theme.nix"           2>/dev/null || true
+        cp {{.ROOT_DIR}}/home/programs/tmux.nix     "$DEST/71-tmux.nix"            2>/dev/null || true
+        cp {{.ROOT_DIR}}/home/programs/tmux/default.nix \
+                                                    "$DEST/72-framework-default.nix" 2>/dev/null || true
+
+        # Currently composed widget list — extract the literal composeBar lines
+        grep -n 'composeBar' {{.ROOT_DIR}}/home/programs/tmux.nix \
+                                                    > "$DEST/73-composed-widgets.txt" 2>/dev/null || true
+
+        # ─── git context (which commit produced this dump) ─────────────────
+        {
+          echo "HEAD=$(cd {{.ROOT_DIR}} && git rev-parse HEAD 2>/dev/null)"
+          echo "BRANCH=$(cd {{.ROOT_DIR}} && git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+          echo "DIRTY=$(cd {{.ROOT_DIR}} && git status --porcelain 2>/dev/null | wc -l) files"
+        }                                           > "$DEST/80-git.txt"
+        (cd {{.ROOT_DIR}} && git diff --stat HEAD -- home/programs/tmux.nix home/programs/theme.nix home/programs/tmux/) \
+                                                    > "$DEST/81-theme-dirty.txt" 2>/dev/null || true
+
+        # ─── tmux server-side plugin dir (TPM-installed plugins) ───────────
+        ls -la "$HOME/.config/tmux/plugins" 2>/dev/null \
+                                                    > "$DEST/90-plugins.txt" || true
+
+        # ─── widget cache state (~/.cache/tmux-widget/*) ───────────────────
+        # For each cache file: mtime + age + size + content + PUA scan. Tells
+        # us:
+        #   (1) when was each widget last refreshed
+        #   (2) what bytes are currently cached
+        #   (3) whether the cached content has PUA Nerd Font glyphs
+        # Used by the CACHE/* checks in 99-checks.txt below.
+        CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-widget"
+        {
+          echo "# Widget cache state at $(date -Iseconds)"
+          echo "# Directory: $CACHE_DIR"
+          echo
+          if [ -d "$CACHE_DIR" ]; then
+            for f in "$CACHE_DIR"/*; do
+              [ -e "$f" ] || continue
+              now=$(date +%s)
+              mtime=$(date -r "$f" +%s 2>/dev/null || echo 0)
+              age=$(( now - mtime ))
+              echo "=== $(basename "$f") ==="
+              echo "path:   $f"
+              echo "mtime:  $(date -r "$f" '+%Y-%m-%dT%H:%M:%S%z')"
+              echo "age:    ${age}s ($(( age / 60 ))m $(( age % 60 ))s)"
+              echo "size:   $(wc -c < "$f") bytes"
+              printf 'content (raw):   '; cat  "$f"; echo
+              printf 'content (hex):   '; xxd "$f" | head -3
+              echo
+            done
+          else
+            echo "(no widget cache directory yet)"
+          fi
+        }                                            > "$DEST/97-widget-cache.txt"
+
+        # ─── automated checks (one assertion per known regression) ─────────
+        # Captures whether each .context/tasks/todo/<ticket>.md issue is
+        # currently present, so the dump self-diagnoses without me eyeballing
+        # raw config files. PASS = fix landed, FAIL = regression present,
+        # INFO = data point worth noting but not a strict pass/fail.
+        python3 - "$DEST" <<'PYEOF' > "$DEST/99-checks.txt"
+        import re, sys, pathlib, unicodedata
+
+        dest = pathlib.Path(sys.argv[1])
+        def read(name):
+            p = dest / name
+            return p.read_text() if p.exists() else ""
+
+        slice_txt  = read("12-status-slice.txt")
+        fmt_txt    = read("13-status-format.txt")
+        winopt_txt = read("11-window-options.txt")
+        right_raw  = read("21-status-right-raw.txt")
+        right_exp  = read("23-status-right-expanded.txt")
+        left_exp   = read("22-status-left-expanded.txt")
+
+        results = []
+        def check(name, ok, detail=""):
+            results.append(("PASS" if ok else "FAIL", name, detail))
+        def info(name, detail=""):
+            results.append(("INFO", name, detail))
+
+        # Ticket 1: snapshotTick at end of status-right
+        check("T1 snapshotTick present in status-right",
+              "tmux-snapshot-tick" in slice_txt,
+              "expected `#(.../tmux-snapshot-tick)` somewhere in status-right")
+
+        # Ticket 2: message-style not tmux default
+        m = re.search(r'^message-style\s+(\S.*)$', slice_txt, re.M)
+        ms = m.group(1).strip('"') if m else "<missing>"
+        check("T2 message-style not tmux default yellow/black",
+              "yellow" not in ms and "fg=black" not in ms,
+              f"got: {ms}")
+
+        # Ticket 3a: status-format[1] uses #{E:...} not #{T;=/...}
+        check("T3a status-format[1] no truncation directive",
+              "#{T;=/#{status-right-length}:status-right}" not in fmt_txt,
+              "found tmux-3.0-only #{T;=/...:status-right} directive — mangles on old tmux/thin clients")
+
+        # Ticket 3b: status-right-length <= 100
+        m = re.search(r'^status-right-length\s+(\d+)', slice_txt, re.M)
+        srl = int(m.group(1)) if m else -1
+        check("T3b status-right-length <= 100",
+              0 < srl <= 100,
+              f"got: {srl} (was 300 in framework regression)")
+
+        # Ticket 3c/d: window-status activity/bell style = bold (not reverse)
+        for kind in ("activity", "bell"):
+            m = re.search(rf'^window-status-{kind}-style\s+(\S+)', winopt_txt, re.M)
+            v = m.group(1) if m else "<missing>"
+            check(f"T3c/d window-status-{kind}-style = bold",
+                  v == "bold",
+                  f"got: {v} (reverse causes flicker on thin SSH clients)")
+
+        # Ticket 3e: window-status-format uses compact #{window_flags}, not per-flag conditionals
+        check("T3e window-status-format uses compact #{window_flags}",
+              "window_zoomed_flag" not in winopt_txt and "window_bell_flag" not in winopt_txt,
+              "found per-flag #{?window_*_flag,...} conditionals — adds escape noise")
+
+        # Ticket 4a: status-style bg not the framework-divergent #373844
+        m = re.search(r'^status-style\s+"?bg=(#[0-9A-Fa-f]+)', slice_txt, re.M)
+        sb = m.group(1).lower() if m else "<missing>"
+        check("T4a status-style bg matches Dracula upstream",
+              sb == "#44475a",
+              f"got: {sb} (Dracula upstream uses #44475a; #373844 was the framework regression)")
+
+        # Ticket 4b: time block bg distinct from window bg (uses #6272A4)
+        check("T4b time block bg = #6272A4 (distinct from window-status bg #44475A)",
+              "#6272A4" in right_raw or "#6272a4" in right_raw,
+              "expected `bg=#6272A4` near the %R %Z fragment")
+
+        # Ticket 5a: snapshotTick output empty (status-right should not end with literal text)
+        snapshot_trailing = right_exp.rstrip("\n").split("snapshot-tick")
+        if len(snapshot_trailing) >= 2:
+            after = snapshot_trailing[-1].lstrip(")")[:20]
+            check("T5/secret-newline: snapshotTick emits empty output",
+                  after.strip() == "" or after.strip().startswith("\n") == False,
+                  f"trailing bytes after snapshot-tick: {after!r}")
+        else:
+            info("snapshotTick output empty — could not locate in expanded status-right")
+
+        # Ticket 5b: no embedded newlines in rendered status (would break the 2-row layout)
+        for name, content in [("status-left", left_exp), ("status-right", right_exp)]:
+            lines = content.rstrip("\n").count("\n")
+            check(f"T5/secret-newline: rendered {name} has no embedded newlines",
+                  lines == 0,
+                  f"got: {lines} embedded newlines in expanded output")
+
+        # Ticket 5c: PUA (Private Use Area) glyphs in rendered status when nerdFonts=false
+        def find_pua(s):
+            out = []
+            for i, ch in enumerate(s):
+                cp = ord(ch)
+                if 0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD:
+                    out.append((i, ch, f"U+{cp:04X}"))
+            return out
+
+        # Two-tier check:
+        #   1. Static check on what was painted at dump time (catches glyphs
+        #      that happened to be rendered right then).
+        #   2. Active check: extract every #(…) command from status-right-raw
+        #      and EXECUTE it directly to catch glyphs that only appear when
+        #      the widget's cache is warm / shell-out succeeds. This catches
+        #      the "I see a cloud icon sometimes" timing-dependent symptom.
+        nerd_in_left  = find_pua(left_exp)
+        nerd_in_right = find_pua(right_exp)
+        nerd_total = len(nerd_in_left) + len(nerd_in_right)
+        theme_nix = read("70-theme.nix")
+        # Determine the EFFECTIVE nerdFonts setting. theme.nix has a default
+        # (`nerdFonts ? false|true`), but the consumer in `home/programs/tmux.nix`
+        # may override it with an explicit positional arg `nerdFonts = …;` in
+        # the `import ./theme.nix { … }` call. Caller wins.
+        src_tmux_nix_for_nf = read("71-tmux.nix")
+        override_match = re.search(
+            r"import\s+\./theme\.nix\s*\{[^}]*\bnerdFonts\s*=\s*(true|false)\s*[;}]",
+            src_tmux_nix_for_nf, re.S)
+        if override_match:
+            nerdfonts_off = override_match.group(1) == "false"
+        else:
+            nerdfonts_off = re.search(r'nerdFonts\s*\?\s*false', theme_nix) is not None
+
+        if nerdfonts_off:
+            check("T5/nerdFont (static): no PUA glyphs in rendered status at dump time",
+                  nerd_total == 0,
+                  f"found {nerd_total} PUA glyph(s): left={nerd_in_left[:3]} right={nerd_in_right[:3]}")
+        else:
+            info(f"nerdFonts=true: PUA glyphs in rendered status: {nerd_total}",
+                 f"left={nerd_in_left[:3]} right={nerd_in_right[:3]}")
+
+        # Active widget-script execution check. Also dumps each widget's
+        # verbatim stdout to 98-widget-outputs.txt so we can directly inspect
+        # what's actually being painted (independent of the status-bar dump
+        # timing). Catches glyphs/newlines that only appear when the widget
+        # has actual content to emit.
+        import subprocess
+        widget_cmds = re.findall(r'#\((/nix/store/[^)]+)\)', right_raw + read("20-status-left-raw.txt"))
+        widget_outputs_path = dest / "98-widget-outputs.txt"
+        with widget_outputs_path.open("w") as wf:
+            wf.write(f"# Verbatim stdout of each #() command in status-left/right at check time.\n")
+            wf.write(f"# Used to spot PUA glyphs, embedded newlines, raw ANSI sequences.\n\n")
+            for cmd_path in widget_cmds:
+                widget_name = cmd_path.split('/')[-1]
+                try:
+                    proc = subprocess.run(cmd_path.split(), capture_output=True, timeout=8, text=True)
+                    stdout = proc.stdout
+                except Exception as e:
+                    info(f"T5/widget-exec: could not execute {widget_name}", str(e))
+                    wf.write(f"=== {widget_name} (EXEC FAILED) ===\n{e}\n\n")
+                    continue
+                wf.write(f"=== {widget_name} ===\n")
+                wf.write(f"length: {len(stdout)} bytes; lines: {stdout.count(chr(10)) + 1}\n")
+                wf.write(f"repr:   {stdout!r}\n")
+                wf.write(f"raw:    {stdout}\n")
+                non_ascii = [(i, ch, f"U+{ord(ch):04X}") for i, ch in enumerate(stdout) if ord(ch) > 127]
+                if non_ascii:
+                    wf.write(f"non-ASCII chars: {non_ascii[:20]}\n")
+                wf.write("\n")
+                pua_hits = find_pua(stdout)
+                if nerdfonts_off:
+                    check(f"T5/nerdFont (active): {widget_name} emits no PUA glyphs",
+                          len(pua_hits) == 0,
+                          f"found {len(pua_hits)} PUA glyph(s) at {pua_hits[:3]} in stdout={stdout[:80]!r}")
+                # Embedded newlines/CR/BEL break the 2-row layout — flag any
+                content_lines = stdout.rstrip("\n").count("\n")
+                cr_count     = stdout.count("\r")
+                bel_count    = stdout.count("\a")
+                check(f"T5/secret-newline (active): {widget_name} output is single-line",
+                      content_lines == 0 and cr_count == 0 and bel_count == 0,
+                      f"newlines={content_lines} cr={cr_count} bel={bel_count} stdout={stdout[:80]!r}")
+                # Raw ANSI escape leak (bare \x1b not wrapped in tmux #[...])
+                raw_ansi = stdout.count("\x1b")
+                check(f"T5/raw-ansi (active): {widget_name} emits no raw \\x1b escape codes",
+                      raw_ansi == 0,
+                      f"found {raw_ansi} raw ESC bytes — tmux can't account for their width, breaks status row geometry")
+
+        # pane-border-format: ensure it doesn't leak shell-set pane_title
+        # (Midnight Commander injects "mc [user@host]:cwd" — visible regression)
+        pbf_path = read("31-pane-border-format.txt").strip()
+        check("pane-border-format: no #{pane_title} (leaks user@host via mc)",
+              "#{pane_title}" not in pbf_path,
+              f"got: {pbf_path}")
+
+        # ─── Glyph WIDTH diagnostics — debug "extra newline on Termius" ────
+        # Background: Nerd Font icons live in the Private Use Area. By Unicode
+        # spec they have wcwidth()=1, but Nerd Fonts render them as 2-cell
+        # icons. tmux uses wcwidth() for its column math → status-right is N
+        # columns wide internally but renders as N+K cells visually. On a
+        # narrow client (Termius mobile, 50–70 cols) the overflow wraps to a
+        # phantom row → "infinite bars" / "secret newline" symptom.
+        #
+        # Report: tmux's reported widget length vs Python's char count vs
+        # likely-rendered cells (PUA chars counted as 2 per Nerd Font convention).
+        widget_outputs_text = widget_outputs_path.read_text()
+        # Parse the widget_outputs file: each "raw:    <content>" line per widget
+        for block in re.split(r"^=== ", widget_outputs_text, flags=re.M):
+            m_name = re.match(r"(\S+) ===", block)
+            m_raw  = re.search(r"^raw:\s+(.*)$", block, re.M)
+            if not (m_name and m_raw):
+                continue
+            wname = m_name.group(1)
+            raw = m_raw.group(1).rstrip()
+            if not raw:
+                continue
+            char_count = len(raw)
+            pua_chars  = [c for c in raw if 0xE000 <= ord(c) <= 0xF8FF
+                                          or 0xF0000 <= ord(c) <= 0xFFFFD]
+            # Likely-rendered cells: ASCII=1, PUA=2 (Nerd Font icon convention)
+            # Standard wide chars (E.A.W "W"/"F") would also be 2 but we don't
+            # detect those here; weather widget uses BMP+PUA only.
+            likely_cells = sum(2 if (0xE000 <= ord(c) <= 0xF8FF or
+                                     0xF0000 <= ord(c) <= 0xFFFFD) else 1
+                               for c in raw)
+            if pua_chars:
+                drift = likely_cells - char_count
+                info(f"WIDTH/{wname}: PUA glyph width drift = +{drift} cells",
+                     f"content={raw!r} python_chars={char_count} "
+                     f"pua_chars={len(pua_chars)} likely_terminal_cells={likely_cells} — "
+                     f"tmux counts {char_count} cols but Termius/Nerd-Font renders {likely_cells} → "
+                     f"overflow risk on narrow clients (status-right-length={srl})")
+
+        # Bonus: what does tmux itself think the rendered status-right width is?
+        # tmux's `#{n:format}` returns length after expansion; comparing to
+        # client_width tells us if we're already pushing the bar's limits.
+        try:
+            n_right = subprocess.check_output(
+                ["tmux", "display", "-p", "#{n:#{T:status-right}}"],
+                stderr=subprocess.DEVNULL).decode().strip()
+            cwidth  = subprocess.check_output(
+                ["tmux", "display", "-p", "#{client_width}"],
+                stderr=subprocess.DEVNULL).decode().strip()
+            info(f"WIDTH/status-right: tmux-reported length vs client width",
+                 f"tmux says status-right = {n_right} cols; client width = {cwidth} cols")
+        except Exception:
+            pass
+
+        # Ticket 5d: empty-widget escape leaks (rendered now-playing block when no music)
+        # Heuristic: status-right contains a `#[fg=...]#[fg=...]#[default]` triple
+        # with no content between escapes — sign of empty #() with no skipWhenEmpty wrapper
+        empty_escape_pattern = re.compile(r'#\[fg=#[0-9A-Fa-f]+\]#\[fg=#[0-9A-Fa-f]+,?bg?=?[#A-Fa-f0-9]*\]\s*#\[default\]')
+        leaks = empty_escape_pattern.findall(right_exp)
+        check("T5/empty-widget: no stray color escapes from empty widgets",
+              len(leaks) == 0,
+              f"found {len(leaks)} suspicious empty-content escape sequence(s) in rendered status-right")
+
+        # ─── CONFIG DRIFT: source → generated → live three-way diff ────────
+        # Catches the most common "my edits aren't applied" frustration:
+        #   layer 1: source tmux.nix (your edits)
+        #   layer 2: generated ~/.config/tmux/tmux.conf (after darwin-rebuild switch)
+        #   layer 3: live `tmux show -g` (after tmux kill-server reload)
+        # When these disagree, the dump previously showed PASS for unrelated
+        # checks but the user STILL saw the broken state on screen.
+        src_tmux_nix = read("71-tmux.nix")  # captured by the dump
+        gen_conf     = read("60-generated-tmux.conf")
+        live_sright  = ""
+        m = re.search(r'^status-right\s+"(.*)"\s*$', slice_txt, re.M)
+        if m:
+            live_sright = m.group(1)
+
+        # Extract the source-level composeBar widget list, e.g. `[ "date-time" ]`
+        # Anchor at line start and reject leading `#` so commented-out reference
+        # lines (`#   set -g status-right …`) don't shadow the live setting.
+        m = re.search(
+            r"^[ \t]*set -g status-right\s+'\$\{framework\.composeBar\s*\[\s*([^]]+)\]\s*\}'",
+            src_tmux_nix, re.M)
+        src_widgets = re.findall(r'"([^"]+)"', m.group(1)) if m else []
+
+        # Extract generated status-right line (the literal one tmux loads)
+        gen_sright = ""
+        for line in gen_conf.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("set -g status-right '"):
+                gen_sright = stripped
+                break
+
+        # Look up each candidate widget in the generated string to see which
+        # are actually present. Names map roughly to `tmux-widget-<name>` paths.
+        all_widget_names = ["session", "now-playing", "weather", "date-time",
+                            "host", "user", "cpu", "ram", "battery", "git",
+                            "kubernetes", "network", "uptime", "application",
+                            "directory", "attached-clients"]
+        def widget_in(s, w):
+            # Looser match — `tmux-widget-now-playing` for shell widgets, or
+            # literal text fragment (e.g. `%R %Z` for date-time).
+            if w == "date-time":
+                return "%R %Z" in s or "date-time" in s
+            return f"tmux-widget-{w}" in s
+
+        gen_widgets  = [w for w in all_widget_names if widget_in(gen_sright,  w)]
+        live_widgets = [w for w in all_widget_names if widget_in(live_sright, w)]
+
+        # Layer 1→2: source matches generated tmux.conf
+        # If the source composeBar list is non-empty and we extracted gen_widgets,
+        # they should match. Mismatch → rebuild didn't apply.
+        if src_widgets:
+            check("CONFIG/source→generated: tmux.nix composeBar matches ~/.config/tmux/tmux.conf",
+                  set(src_widgets) == set(gen_widgets),
+                  f"source={src_widgets} generated={gen_widgets} — run `sudo darwin-rebuild switch --flake .` and check for errors")
+        else:
+            info("CONFIG/source→generated: could not parse source composeBar list — skipping")
+
+        # Layer 2→3: generated matches live tmux server state
+        # If gen_widgets != live_widgets, tmux server didn't reload.
+        if gen_widgets or live_widgets:
+            check("CONFIG/generated→live: generated tmux.conf matches live tmux server",
+                  gen_widgets == live_widgets,
+                  f"generated={gen_widgets} live={live_widgets} — run `tmux kill-server` from OUTSIDE tmux to reload")
+
+        # Bonus diagnostic: dirty source files that differ from HEAD
+        dirty = read("81-theme-dirty.txt").strip()
+        if dirty:
+            info("CONFIG/source-dirty: uncommitted edits present (may or may not be in the active generation)",
+                 dirty.replace("\n", " | ")[:200])
+
+        # ─── CACHE STATE: ~/.cache/tmux-widget/* introspection ─────────────
+        # Three concrete questions per cache file:
+        #   (1) when was it last pulled (mtime / age)
+        #   (2) does it contain PUA Nerd Font glyphs (the regression)
+        #   (3) is its content what tmux currently paints (cache ≡ live)
+        import os, time
+        cache_dir = pathlib.Path(os.environ.get("XDG_CACHE_HOME",
+                                                pathlib.Path.home() / ".cache")) / "tmux-widget"
+        if cache_dir.is_dir():
+            now = int(time.time())
+            # Group cache files by widget prefix (e.g. "tmux-widget-weather")
+            # so we can identify which cache is ACTIVE for each widget. The
+            # hash-keyed naming (`_cache.nix` content-key) means every rebuild
+            # produces a new filename — old caches linger as orphans. The
+            # newest mtime per prefix is the one the current build's wrapper
+            # is writing to; older ones are harmless leftovers.
+            groups = {}
+            for cf in cache_dir.iterdir():
+                if not cf.is_file():
+                    continue
+                prefix = cf.name.rsplit("-", 1)[0]  # strip trailing "-<hash>"
+                groups.setdefault(prefix, []).append(cf)
+            active_caches = set()
+            for prefix, files in groups.items():
+                files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+                active_caches.add(files[0].name)   # newest mtime = active
+            for cf in sorted(cache_dir.iterdir()):
+                if not cf.is_file():
+                    continue
+                content = cf.read_text(errors="replace")
+                age_s = now - int(cf.stat().st_mtime)
+                age_h = f"{age_s // 60}m{age_s % 60}s"
+                is_active = cf.name in active_caches
+                tag = "active" if is_active else "ORPHAN"
+
+                # (1) when was it pulled
+                info(f"CACHE/{cf.name} ({tag}): last refresh {age_h} ago",
+                     f"mtime={time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(cf.stat().st_mtime))} "
+                     f"size={len(content)}B content={content!r}")
+
+                # Orphans get only the info line — they're not in the active
+                # build's wrapper, so PUA glyphs / live-mismatch are by design.
+                # Suggest cleanup once at the end (below).
+                if not is_active:
+                    continue
+
+                # (2) does cache contain a PUA glyph (active caches only)
+                pua_hits = find_pua(content)
+                check(f"CACHE/{cf.name}: no PUA glyphs in cached content",
+                      len(pua_hits) == 0,
+                      f"cache has {len(pua_hits)} PUA glyph(s) at {pua_hits[:3]} — "
+                      f"rebuild changed the script source but cache_file path didn't change. "
+                      f"Manual unblock: rm {cf}")
+
+                # (3) is what tmux paints == what's in the cache? (active caches only)
+                trimmed = content.rstrip()
+                if trimmed:
+                    in_live = trimmed in right_exp.rstrip()
+                    widget_in_status = any(
+                        cf.name.startswith(w) for w in
+                        ("tmux-widget-weather", "tmux-widget-now-playing",
+                         "tmux-widget-git", "tmux-widget-kubernetes",
+                         "tmux-widget-network", "tmux-widget-battery")
+                        if w in right_raw or w in left_exp
+                    )
+                    if widget_in_status:
+                        # First-write race: if cache was just created (age < 10s),
+                        # the dump's `tmux display -p '#{T:status-right}'` likely
+                        # ran BEFORE the background fetch finished writing the
+                        # cache file. The very next status-interval tick paints it.
+                        if not in_live and age_s < 10:
+                            info(f"CACHE/{cf.name}: cached content not yet in live status-right (first-write race)",
+                                 f"cache freshly written {age_s}s ago — dump caught the cache between "
+                                 f"first call (returned empty) and bg-fetch completion. Re-run dump in ~5s to confirm.")
+                        else:
+                            check(f"CACHE/{cf.name}: cached content appears in live status-right",
+                                  in_live,
+                                  f"cache={trimmed!r:.80s} but not found in rendered status — "
+                                  f"either tmux is reading a different cache key, or the widget "
+                                  f"isn't actually composed into status-right")
+                    else:
+                        info(f"CACHE/{cf.name}: widget not currently in status-right (cache orphaned but harmless)",
+                             f"cached content {trimmed!r:.80s} — leftover from a previous build/config")
+            # Suggest cleanup if there are orphans accumulating
+            orphan_files = [cf for cf in cache_dir.iterdir()
+                            if cf.is_file() and cf.name not in active_caches]
+            if orphan_files:
+                info(f"CACHE/orphans: {len(orphan_files)} stale cache file(s) — safe to delete",
+                     "leftover from previous builds (script hash changed → new cache path). "
+                     f"To wipe: rm {' '.join(str(f) for f in orphan_files)}")
+        else:
+            info("CACHE: ~/.cache/tmux-widget/ does not exist yet",
+                 "no cached widgets have run — fresh state")
+
+        # Print summary
+        passed = sum(1 for r in results if r[0] == "PASS")
+        failed = sum(1 for r in results if r[0] == "FAIL")
+        info_ct = sum(1 for r in results if r[0] == "INFO")
+
+        for verdict, name, detail in results:
+            print(f"[ {verdict:4} ] {name}")
+            if detail and verdict != "PASS":
+                print(f"           {detail}")
+
+        print()
+        print(f"Summary: {passed} PASS, {failed} FAIL, {info_ct} INFO")
+        if failed > 0:
+            print(f"\nReference tickets: .context/tasks/todo/2026-05-14T08-*.md")
+            sys.exit(0)  # don't fail the whole dump, just report
+        PYEOF
+
+        # Echo check summary to stdout so the user sees it inline
+        echo
+        tail -1 "$DEST/99-checks.txt"
+
+        # ─── stable pointer for Claude to read ─────────────────────────────
+        rm -rf "$LATEST"
+        cp -R "$DEST" "$LATEST"
+
+        printf '\n✓ dump complete\n  stamped: %s\n  latest:  %s\n\n' "$DEST" "$LATEST"
+        ls "$LATEST"
+
+  debug:theme-diff:
+    desc: Diff the two most recent theme dumps (e.g. dracula vs current)
+    cmds:
+      - |
+        set -eu
+        cd {{.DUMP_ROOT}}
+        DUMPS=$(ls -1dt */ 2>/dev/null | grep -v '^latest/$' | head -2)
+        N=$(echo "$DUMPS" | wc -l | tr -d ' ')
+        if [ "$N" -lt 2 ]; then
+          echo "Need at least 2 dumps. Found: $N" >&2
+          echo "Run \`task debug:theme\` in each theme state." >&2
+          exit 1
+        fi
+        NEW=$(echo "$DUMPS" | sed -n '1p' | tr -d '/')
+        OLD=$(echo "$DUMPS" | sed -n '2p' | tr -d '/')
+        echo "Diffing: $OLD  →  $NEW"
+        echo
+        diff -ru "$OLD" "$NEW" > diff.txt || true
+        echo "Wrote {{.DUMP_ROOT}}/diff.txt ($(wc -l < diff.txt) lines)"
+        echo
+        echo "Key files to look at first:"
+        for f in 10-server-options.txt 12-status-slice.txt 13-status-format.txt \
+                 30-pane-border-status.txt 31-pane-border-format.txt 33-pane-title.txt \
+                 51-keys-root.txt; do
+          if ! diff -q "$OLD/$f" "$NEW/$f" >/dev/null 2>&1; then
+            echo "  CHANGED: $f"
+          fi
+        done
+
+  debug:theme-clean:
+    desc: Wipe all theme dumps
+    cmds:
+      - rm -rf {{.DUMP_ROOT}}
+      - echo "wiped {{.DUMP_ROOT}}"

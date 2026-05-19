@@ -2,14 +2,14 @@
 #
 # Usage from home-manager (data-style import):
 #
-#   theme = import ../programs/theme.nix { inherit lib; preset = "catppuccin"; };
-#   tmuxFramework = import ../programs/tmux { inherit lib pkgs theme; };
+#   theme     = import ../theme.nix { inherit lib; preset = "dracula"; };
+#   framework = import ./tmux       { inherit lib pkgs theme; };
 #
-#   programs.tmux = tmuxFramework.mkTmux {
-#     leftWidgets  = [ "host" ];                       # currently only host
-#     rightWidgets = [ ];                              # to be expanded
-#     extraConfig  = "...";                            # user's existing keybinds/menus
-#   };
+#   # Inside programs.tmux.extraConfig:
+#   set -g status-left  '${framework.composeBar [ "session" ]}'
+#   set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" ]}'
+#   set -g window-status-format         '${framework.windowStyle.format}'
+#   set -g window-status-current-format '${framework.windowStyle.currentFormat}'
 #
 # The framework is theme-aware but theme-agnostic in code — it never references
 # "catppuccin" or "dracula" by name. Swapping themes = changing theme.nix.
@@ -42,35 +42,5 @@ let
   };
 in
 {
-  # Expose internals for tests and introspection
   inherit theme separators widgets composeModule renderWidget composeBar windowStyle;
-
-  # Main entry — produces a programs.tmux attrset.
-  mkTmux = {
-    leftWidgets  ? [],
-    rightWidgets ? [],
-    extraConfig  ? "",
-  }:
-  let
-    statusLeft  = composeBar leftWidgets;
-    statusRight = composeBar rightWidgets;
-  in
-  {
-    enable = true;
-    statusBar = { left = statusLeft; right = statusRight; };  # exposed for debugging
-    extraConfig = ''
-      set -g status-left  '${statusLeft}'
-      set -g status-right '${statusRight}'
-      set -g status-bg    '${theme.palette.bg}'
-      set -g status-fg    '${theme.palette.fg}'
-      set -g status-interval 5
-
-      # Window status
-      set -g window-status-format         '${windowStyle.format}'
-      set -g window-status-current-format '${windowStyle.currentFormat}'
-      set -g window-status-separator      '${windowStyle.separator}'
-
-      ${extraConfig}
-    '';
-  };
 }

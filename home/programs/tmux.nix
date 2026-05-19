@@ -124,94 +124,35 @@
     fi
   '';
 
-  # tmuxStatusWidgets / tmuxDraculaPlugins removed — replaced by framework widgets
-  # in home/programs/tmux/widgets/. See ./tmux/default.nix for composition.
-#
-#  now-playing = pkgs.tmuxPlugins.mkTmuxPlugin {
-#    pluginName = "tmux-now-playing";
-#    version = "local-2025-09-17";
-#    rtpFilePath = "now-playing.tmux"; # Plugin has unconventional RTP file name
-#    src = /Users/dmitry/dev/dimmkirr/tmux-now-playing;
-#  };
-
-
+  # Loaded as a tmux plugin (registers itself + provides defaults for
+  # @now-playing-* runtime options that music.sh reads). NOTE: pinned to
+  # master, while widgets/now-playing.nix pins the feature/add-media-control
+  # branch for music.sh — different commits on purpose. The feature branch
+  # has the "empty output when no player" fix the widget needs; the outer
+  # plugin's master is fine for the option-defaults role.
   now-playing = pkgs.tmuxPlugins.mkTmuxPlugin {
-    pluginName = "tmux-now-playing";
-    version = "unstable-2025-09-17";
-    rtpFilePath = "now-playing.tmux"; # Plugin has unconventional RTP file name
+    pluginName  = "tmux-now-playing";
+    version     = "unstable-2025-09-17";
+    rtpFilePath = "now-playing.tmux";
     src = pkgs.fetchFromGitHub {
       owner = "DimmKirr";
-      repo = "tmux-now-playing";
-      rev = "5077d4e103e63ef1b3a9cf54e634d3900eafd02f";
+      repo  = "tmux-now-playing";
+      rev   = "5077d4e103e63ef1b3a9cf54e634d3900eafd02f";
       sha256 = "hXh4zvCUitFsal3FWLuumbuDn85cCQWIDI/YNJtlKxE=";
     };
   };
 
-
-  colortag = pkgs.tmuxPlugins.mkTmuxPlugin {
-    pluginName = "tmux-colortag";
-    version = "unstable-2025-08-08";
-#    rtpFilePath = "now-playing.tmux"; # Plugin has unconventional RTP file name
-    src = pkgs.fetchFromGitHub {
-      owner = "Determinant";
-      repo = "tmux-colortag";
-      rev = "72ef7174f63dcf8e2809376f8f8a39ca1d910efc";
-      sha256 = "aN2UzJVnKoYw5dlqHRoHkYK/zGMoa28qet/jnPAAAAA=";
-    };
-  };
-
-
-  powerline = pkgs.tmuxPlugins.mkTmuxPlugin {
-    pluginName = "tmux-powerline";
-    version = "v3.1.0";
-    rtpFilePath = "main.tmux"; # Plugin has unconventional RTP file name
-    src = pkgs.fetchFromGitHub {
-      owner = "erikw";
-      repo = "tmux-powerline";
-      rev = "cf1097754c57f2ef99c9087d72706ff6203ac8ab";
-      sha256 = "BB/SdwP4EAWbeM1Yyz4bnMX6HvBIIu9QTp9H5ZO3XEY=";
-    };
-  };
-
-  clima  = pkgs.tmuxPlugins.mkTmuxPlugin {
-    pluginName = "tmux-clima";
-    version = "unstable-2024-09-10";
-    rtpFilePath = "clima.tmux"; # Plugin has unconventional RTP file name
-    src = pkgs.fetchFromGitHub {
-      owner = "vascomfnunes";
-      repo = "tmux-clima";
-      rev = "9052e5c475ba0815bef2367fb473324f3c4e6d84";
-      sha256 = "icSLRz+voMTA1hSixNLFD0fmseOaltSQwKMdL5JhAk4=";
-    };
-  };
-
-
-
   tmuxp-fzf = pkgs.tmuxPlugins.mkTmuxPlugin {
-    pluginName = "tmuxp-fzf";
-    version = "unstable-2024-03-01";
+    pluginName  = "tmuxp-fzf";
+    version     = "unstable-2024-03-01";
     rtpFilePath = "main.tmux";
     src = pkgs.fetchFromGitHub {
       owner = "andersondanilo";
-      repo = "tmuxp-fzf";
-      rev = "821924e376139922691d73624f2da4dd9b2bf63d";
+      repo  = "tmuxp-fzf";
+      rev   = "821924e376139922691d73624f2da4dd9b2bf63d";
       sha256 = "sha256-KDfQYX16IYpdJymsdzcS6yICJyny3dzpEYi2WrnnC10=";
     };
   };
-
-#  menus = pkgs.tmuxPlugins.mkTmuxPlugin {
-#    pluginName = "tmux-menus";
-#    version = "v2.2.18";
-#    rtpFilePath = "menus.tmux"; # Plugin has unconventional RTP file name
-#    src = pkgs.fetchFromGitHub {
-#      owner = "jaclu";
-#      repo = "tmux-menus";
-#      rev = "47b886104e8ebc50d7890d15320ac28477dace2e";
-#      sha256 = "aN2UzJVnKoYw5dlqHRoHkYK/zGMoa28qet/jnP7zJzw=";
-#    };
-#  };
-
-  # (Removed temporary Dracula override — framework owns status bar now.)
 in {
   enable = true;
 
@@ -456,15 +397,15 @@ in {
         set -g window-status-activity-style bold
         set -g window-status-bell-style     bold
 
-        set-environment -g TMUX_WIDGET_WEATHER_CITY  "NYC"
-        set-environment -g TMUX_WIDGET_WEATHER_UNIT  "u"
+        # Weather city/unit are baked into the widget at Nix eval (NYC / "u")
+        # via @CITY@/@UNIT@ substitution. Override at runtime by setting
+        # TMUX_WIDGET_WEATHER_CITY / TMUX_WIDGET_WEATHER_UNIT — weather.sh
+        # picks env up if present, falls through to the baked default otherwise.
 
         set -g status-left  '${framework.composeBar [ "session" ]}'
-        # Full widget composition restored after _cache.nix hash-key fix —
-        # cache invalidates automatically when widget scripts change, so
-        # the stale-PUA-glyph regression after `nerdFonts` flips is gone.
-        # If thin-client distortion returns, revert to `[ "date-time" ]`
-        # and inspect 97-widget-cache.txt + the CACHE/* checks in 99-checks.txt.
+        # If thin-client distortion returns: trim status-right to a smaller
+        # widget set (e.g. `[ "date-time" ]`) and inspect the test harness
+        # output under home/programs/tmux/tests/.
         set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" ]}'
         # Periodic auto-save tick — MUST come after the `set -g status-right`
         # above, otherwise that overwrite clobbers this appended #() command.
@@ -495,36 +436,6 @@ in {
   '';
 
   plugins = with pkgs.tmuxPlugins; [
-#    {
-#      plugin = sidebar;
-#      extraConfig = ''
-#
-#      '';
-#    }
-#    {
-#      plugin = clima;
-#      extraConfig = ''
-#        set -g @clima_unit imperial
-#        set -g @clima_location "NYC"
-#        set -g @clima_show_icon 1
-#        set -g @clima_use_nerd_font 1
-#      '';
-#    }
-#    {
-#      plugin = menus;
-#      extraConfig = ''
-#        set -g @menus_use_cache 'No'
-#
-#      '';
-#    }
-
-#    {
-#      plugin = powerline;
-#      extraConfig = ''
-#
-#
-#      '';
-#    }
     {
       plugin = now-playing;
       extraConfig = ''
@@ -537,7 +448,6 @@ in {
         set -g @now-playing-scrollable-threshold "30"
         set -g @now-playing-play-pause-key ""
         set -g @now-playing-stop-key ""
-        set -g @now-playing-play-pause-key ""
         set -g @now-playing-next-key ""
       '';
     }

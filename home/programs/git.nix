@@ -11,7 +11,7 @@
   settings = {
     user = {
       name = "Dmitry Kireev";
-      email = "dmitry@hazelops.com";
+      email = "dmitry@kirr.io";
     };
     init = {
       defaultBranch = "main";

@@ -10,6 +10,7 @@ with pkgs; [
   raycast
   ext4fuse
   cocoapods
+  fastlane
   # xquartz  # Using homebrew cask instead - nix build fails on 25.11
   # karabiner-elements  # Using homebrew - nix can't register app bundles with macOS properly
 

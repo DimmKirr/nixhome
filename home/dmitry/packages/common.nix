@@ -134,6 +134,10 @@ let
     tmuxp
     aws-vault
     graphviz
+
+    # Mobile UI testing
+    maestro
+    imagemagick
   ];
 
   # Unstable channel packages

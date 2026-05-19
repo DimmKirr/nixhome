@@ -10,6 +10,19 @@
 #   minimal   — bare "iconFg icon text" with no background blocks or separators
 #   powerline — same as twoTone but uses sharp arrow separators (caller picks sep="sharp")
 #
+# == Comma-in-style invariant ==
+# tmux's `#[...]` style attribute parser splits on commas (`fg=red,bg=blue` →
+# two attrs). Format expressions can also contain commas (`#{?cond,A,B}`,
+# `#{==:X,Y}`). Mixing the two breaks the parser. Two consequences enforced
+# below:
+#   1. `fgBg` emits TWO directives `#[fg=…]#[bg=…]` instead of combined
+#      `#[fg=…,bg=…]` — keeps each `#[…]` to a single attribute so the
+#      `skipWhenEmpty` wrapper's `#{?#{==:…,…},…,…}` doesn't split inside.
+#   2. When `iconBg` itself is a conditional (`#{?client_prefix,A,B}`), it
+#      can NOT live inside `#[bg=…]` because the inner commas would split
+#      the style attr. We render the whole module twice (once per branch)
+#      and wrap in a top-level `#{?cond,<full-A-block>,<full-B-block>}`.
+#
 # Args:
 #   separators : { left, right, middle }  — glyph set
 #   lib        : nixpkgs lib
@@ -37,12 +50,7 @@ let
   s = separators;
 
   # tmux color-escape helpers — single source of truth so we never typo `#[fg=…]`.
-  # IMPORTANT: emit fg and bg as TWO separate `#[...]` directives, not as
-  # combined `#[fg=…,bg=…]`. tmux's `#{?cond,then,else}` parser splits on
-  # commas; commas inside `#[…]` style attributes confuse that parser and
-  # break our `skipWhenEmpty` wrappers (which are `#{?#{==:…,…},…,…}` —
-  # commas inside the rendered block would be miscounted, truncating the
-  # conditional). Matches the pre-framework Dracula plugin's pattern.
+  # `fgBg` keeps fg and bg as separate `#[…]` directives — see file header.
   fg     = c: "#[fg=${c}]";
   fgBg   = c: b: "#[fg=${c}]#[bg=${b}]";
   reset  = "#[default]";
@@ -52,24 +60,47 @@ let
   # (the high-contrast color paired with iconBg) for the text so it's readable
   # on bright bg colors like peach/pink/sky — matches stock Dracula's
   # "dark text on accent block" style.
-  twoTone =
+  twoToneOf = bg:
     if icon == ""
     then ''
-      ${fg iconBg}${s.left}${fgBg iconFg iconBg}${text}${fg iconBg}${s.right}${reset}''
+      ${fg bg}${s.left}${fgBg iconFg bg}${text}${fg bg}${s.right}${reset}''
     else ''
-      ${fg iconBg}${s.left}${fgBg iconFg iconBg}${icon}${fgBg textFg textBg}${s.middle}${text}${fg textBg}${s.right}${reset}'';
+      ${fg bg}${s.left}${fgBg iconFg bg}${icon}${fgBg textFg textBg}${s.middle}${text}${fg textBg}${s.right}${reset}'';
 
-  flat = ''
-    ${fg iconBg}${s.left}${fgBg iconFg iconBg} ${icon} ${text} ${fg iconBg}${s.right}${reset}'';
+  flatOf = bg: ''
+    ${fg bg}${s.left}${fgBg iconFg bg} ${icon} ${text} ${fg bg}${s.right}${reset}'';
 
   minimal = ''
     ${fg iconFg}${icon}${fg textFg}${text}${reset}'';
 
-  powerline = twoTone;  # visual difference comes from caller picking separators="sharp"
-
-  rendered = {
-    inherit twoTone flat minimal powerline;
+  styleRender = bg: {
+    twoTone   = twoToneOf bg;
+    flat      = flatOf bg;
+    minimal   = minimal;
+    powerline = twoToneOf bg;  # same as twoTone, visual diff comes from sharp separators
   }.${style};
+
+  # Conditional-iconBg lift — see file header for the comma-in-style invariant.
+  # Limitation: only handles a SIMPLE `#{?cond,A,B}` (3 comma-separated parts).
+  # A nested conditional (e.g. `#{?#{==:foo,bar},A,B}`) would mis-split.
+  isConditionalBg = lib.hasPrefix "#{?" iconBg;
+  parsed =
+    let
+      inner = lib.removeSuffix "}" (lib.removePrefix "#{?" iconBg);
+      parts = lib.splitString "," inner;
+    in
+      if isConditionalBg && builtins.length parts == 3
+      then {
+        cond    = builtins.elemAt parts 0;
+        thenBg  = builtins.elemAt parts 1;
+        elseBg  = builtins.elemAt parts 2;
+      }
+      else null;
+
+  rendered =
+    if parsed != null
+    then "#{?${parsed.cond},${styleRender parsed.thenBg},${styleRender parsed.elseBg}}"
+    else styleRender iconBg;
 
   # Empty-skip wrapper. tmux's `#{?#{==:A,B},then,else}` compares two strings;
   # if `text` contains a `#()` command, tmux evaluates it before comparing,

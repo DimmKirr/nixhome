@@ -621,6 +621,70 @@ class MainHorizontalMirroredRoundTripTests(unittest.TestCase):
         self.assertNotIn("WARN", buf.getvalue(),
                          f"warnings during re-apply:\n{buf.getvalue()}")
 
+    def test_two_pane_mirrored_preserves_pane_identity_round_trip(self):
+        """Reproduces the `pve` window case from NMD-pve-sorted.yaml.
+
+        Two-pane horizontal split with main-pane-height=2 and
+        main-horizontal-mirrored applied: pane_index 0 is in the main slot
+        (bottom, h=2), pane_index 1 is the top (h=47). The saved layout's
+        DFS order is [top, bottom], i.e. [pane_index_1, pane_index_0].
+
+        Current save sorts panes by pane_index → YAML pane order
+        [pane_index_0, pane_index_1]. tmuxp creates panes in YAML order
+        and DFS-substitutes them into the layout, swapping content
+        between the visual slots. Since 2-pane layouts don't match
+        detect_preset_layout (needs 3+ panes), there's no post-load
+        re-apply to fix it.
+
+        Asserts: the CELL_ID at each visual slot survives the round trip.
+        """
+        sock = self.fx.sock
+        env = self.fx.env
+
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.2)
+
+        # CELL_ID at top slot vs bottom slot before save.
+        before_panes = self._list_panes_visual(sock, env)
+        self.assertEqual(len(before_panes), 2,
+                         f"setup: expected 2 panes, got {before_panes}")
+        top_pid_before  = before_panes[0][-1]    # smallest pane_top
+        bot_pid_before  = before_panes[-1][-1]
+        top_cell_before = top_pid_before.lstrip("%")
+        bot_cell_before = bot_pid_before.lstrip("%")
+        # Sanity: bottom strip really is h=2
+        self.assertEqual(before_panes[-1][3], 2,
+                         f"setup: bottom strip h != 2: {before_panes}")
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+
+        after_panes = self._list_panes_visual(self.fx.load_sock, env)
+        self.assertEqual(len(after_panes), 2,
+                         f"expected 2 panes after load: {after_panes}")
+        self.assertEqual(after_panes[-1][3], 2,
+                         f"bottom strip h != 2 after load: {after_panes}")
+        top_pid_after = after_panes[0][-1]
+        bot_pid_after = after_panes[-1][-1]
+        top_cell_after = self._read_cell_id(self.fx.load_sock, top_pid_after, env)
+        bot_cell_after = self._read_cell_id(self.fx.load_sock, bot_pid_after, env)
+
+        self.assertEqual(top_cell_after, top_cell_before,
+                         f"TOP slot CELL_ID changed across round-trip.\n"
+                         f"  before: top={top_cell_before}, bot={bot_cell_before}\n"
+                         f"  after:  top={top_cell_after},  bot={bot_cell_after}\n"
+                         f"  (contents swapped — pane_index sort vs DFS order mismatch)")
+        self.assertEqual(bot_cell_after, bot_cell_before,
+                         f"BOTTOM slot CELL_ID changed across round-trip")
+
     def test_detect_preset_skips_user_resized_layout(self):
         """Unit test for the canonical-only detector: asymmetric
         secondary widths are NOT a preset, equal widths are. Used by

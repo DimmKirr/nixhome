@@ -313,16 +313,30 @@ def _secondaries_canonical(group: str, dim_index: int) -> bool:
     return (hi - lo) <= 1
 
 
-def detect_preset_layout(layout: str) -> str | None:
+def detect_preset_layout(layout: str,
+                         options: dict[str, str] | None = None) -> str | None:
     """Return tmux preset name iff the layout matches a canonical preset.
 
-    Shape match:
+    3+ pane shapes (one main pane + a group of equal-sized secondaries):
       [leaf, {leaves}]   → main-horizontal           (main on top)
       [{leaves}, leaf]   → main-horizontal-mirrored  (main on bottom)
       {leaf, [leaves]}   → main-vertical             (main on left)
       {[leaves], leaf}   → main-vertical-mirrored    (main on right)
 
-    Canonical check: secondaries must be equal-sized (±1 for rounding).
+    2-pane shapes (both children are leaves with unequal sizes):
+      [leaf_main, leaf]  → main-horizontal           (main on top)
+      [leaf, leaf_main]  → main-horizontal-mirrored  (main on bottom)
+      {leaf_main, leaf}  → main-vertical             (main on left)
+      {leaf, leaf_main}  → main-vertical-mirrored    (main on right)
+    The 2-pane case is gated on the window having `main-pane-height`
+    (for `[ ]`) or `main-pane-width` (for `{ }`) explicitly set in its
+    options, AND one of the leaf sizes matches the option exactly. That
+    means the user invoked `select-layout main-*` (and our `prefix S h`
+    binding leaves a fingerprint by setting the option). Without that
+    fingerprint we treat the split as custom and skip the preset → the
+    byte-exact load runs unchanged.
+
+    3+ pane canonical check: secondaries equal-sized (±1 for rounding).
     A user-dragged divider produces asymmetric secondaries, which we
     treat as a custom layout — no preset name is emitted, so the load
     path won't enforce a canonical re-apply and the saved layout
@@ -345,6 +359,37 @@ def detect_preset_layout(layout: str) -> str | None:
     a, b = children
     a_is_leaf = ("[" not in a) and ("{" not in a)
     b_is_leaf = ("[" not in b) and ("{" not in b)
+
+    # 2-pane case: both children are leaves. The shape alone is
+    # ambiguous (could be a custom-dragged split, even-*, or main-*),
+    # so we require the corresponding main-pane-* option to be set on
+    # the window AND to match one of the leaf sizes.
+    if a_is_leaf and b_is_leaf:
+        opts = options or {}
+        a_w, a_h = _wh(a)
+        b_w, b_h = _wh(b)
+        if opener == "[":
+            try:
+                target = int(opts.get("main-pane-height", ""))
+            except ValueError:
+                return None
+            if a_h == target and a_h != b_h:
+                return "main-horizontal"            # first leaf is main (top)
+            if b_h == target and a_h != b_h:
+                return "main-horizontal-mirrored"   # second leaf is main (bottom)
+            return None
+        if opener == "{":
+            try:
+                target = int(opts.get("main-pane-width", ""))
+            except ValueError:
+                return None
+            if a_w == target and a_w != b_w:
+                return "main-vertical"
+            if b_w == target and a_w != b_w:
+                return "main-vertical-mirrored"
+            return None
+        return None
+
     a_has_brace = "{" in a
     b_has_brace = "{" in b
     a_has_bracket = "[" in a
@@ -411,7 +456,7 @@ def emit_yaml(session: Session,
     # byte-exact.
     presets: dict[str, str] = {}
     for w in session.windows:
-        p = detect_preset_layout(w.layout)
+        p = detect_preset_layout(w.layout, options=w.options)
         if p:
             presets[w.name] = p
     if presets:

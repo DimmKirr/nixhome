@@ -274,12 +274,17 @@ class RoundTripTests(unittest.TestCase):
         # Run a long-lived python so pane_current_command shows "python3".
         tmux(sock, "send-keys", "-t", pids[1],
              "python3 -c 'import time; time.sleep(60)'", "Enter")
-        time.sleep(0.6)
-
-        cur = tmux(sock, "list-panes", "-t", "rt:win",
-                   "-F", "#{pane_current_command}").splitlines()
+        # Poll for python detection — startup time varies wildly across
+        # environments (cold cache, slow filesystems, devcell containers).
+        cur: list[str] = []
+        for _ in range(60):  # up to 6s
+            time.sleep(0.1)
+            cur = tmux(sock, "list-panes", "-t", "rt:win",
+                       "-F", "#{pane_current_command}").splitlines()
+            if any("python" in c for c in cur):
+                break
         self.assertTrue(any("python" in c for c in cur),
-                        f"python pane not detected: {cur}")
+                        f"python pane not detected after 6s: {cur}")
 
         target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
         text = target.read_text()
@@ -1109,6 +1114,172 @@ class EmptySessionTest(unittest.TestCase):
         out = tmux(self.fx.load_sock, "list-sessions",
                    "-F", "#{session_name}").strip()
         self.assertEqual(out, "rt")
+
+
+class PaneTitleRoundTripTests(unittest.TestCase):
+    """Title-based round-trip: more robust than CELL_ID-via-shell.
+
+    Same scenario as MainHorizontalMirroredRoundTripTests.test_reapply_*,
+    but identifies panes by `#{pane_title}` (queried directly from tmux)
+    instead of shelling into each pane to read `$CELL_ID`.
+    """
+
+    PANE_NAMES = ["left", "right", "bottom"]
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def _visual_panes(self, sock: str) -> list:
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_top} #{pane_left} #{pane_id}",
+                   env=self.fx.env).splitlines()
+        return sorted(
+            (int(t), int(l), pid)
+            for t, l, pid in (line.split() for line in raw if line.strip())
+        )
+
+    def _titles_in_visual_order(self, sock: str) -> list[str]:
+        return [
+            tmux(sock, "display-message", "-p", "-t", pid, "#{pane_title}",
+                 env=self.fx.env).strip()
+            for _, _, pid in self._visual_panes(sock)
+        ]
+
+    def _build_three_pane_mirrored(self, sock: str) -> None:
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+
+    def _build_three_pane_main_horizontal(self, sock: str) -> None:
+        """3-pane main-horizontal (NON-mirrored): big main on TOP,
+        two small secondaries on the BOTTOM row."""
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        # Split vertically → top, bottom
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        # Split the BOTTOM pane horizontally → top, bottom-left, bottom-right
+        bot_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        bot_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in bot_pane if l)[-1][1]
+        tmux(sock, "split-window", "-h", "-t", bot_id, env=env)
+        # main-pane-height controls the big main strip on top
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "20", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal", env=env)
+
+    def test_titles_survive_save_load_reapply(self):
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_three_pane_mirrored(sock)
+
+        # Tag panes by visual position with human-readable titles
+        for (top, left, pid), name in zip(self._visual_panes(sock),
+                                          self.PANE_NAMES):
+            tmux(sock, "select-pane", "-t", pid, "-T", name, env=env)
+
+        before_titles = self._titles_in_visual_order(sock)
+        self.assertEqual(self.PANE_NAMES, before_titles,
+                         "pre-save title tagging did not stick")
+
+        # Snapshot the layout
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        self.assertIn("CELL_TITLE", target.read_text(),
+                      "snapshot YAML missing CELL_TITLE entries")
+
+        # Kill + load (load_session re-applies preset + restores titles)
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+
+        after_load_titles = self._titles_in_visual_order(self.fx.load_sock)
+
+        # Re-apply the same preset (simulates user pressing `prefix S h`
+        # after a fresh load) — the scenario the user suspects scrambles.
+        tmux(self.fx.load_sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(self.fx.load_sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.2)
+
+        after_reapply_titles = self._titles_in_visual_order(self.fx.load_sock)
+
+        self.assertEqual(self.PANE_NAMES, after_load_titles,
+                         f"titles scrambled after load:\n"
+                         f"  expected: {self.PANE_NAMES}\n"
+                         f"  got:      {after_load_titles}")
+        self.assertEqual(self.PANE_NAMES, after_reapply_titles,
+                         f"titles scrambled after re-apply:\n"
+                         f"  expected: {self.PANE_NAMES}\n"
+                         f"  got:      {after_reapply_titles}")
+
+    def test_main_horizontal_titles_survive_save_load_reapply(self):
+        """Non-mirrored variant: main pane on TOP, two secondaries below.
+
+        Visual order (top→bottom, left→right): top, bottom-left, bottom-right.
+        After save → kill → load → re-apply `main-horizontal`, the titles
+        must land in the SAME visual slots.
+        """
+        sock = self.fx.sock
+        env = self.fx.env
+        expected = ["top", "bottom-left", "bottom-right"]
+        self._build_three_pane_main_horizontal(sock)
+
+        # Tag panes by visual position
+        for (top, left, pid), name in zip(self._visual_panes(sock), expected):
+            tmux(sock, "select-pane", "-t", pid, "-T", name, env=env)
+
+        before_titles = self._titles_in_visual_order(sock)
+        self.assertEqual(expected, before_titles,
+                         "pre-save title tagging did not stick")
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        yaml_text = target.read_text()
+        self.assertIn("CELL_TITLE", yaml_text,
+                      "snapshot YAML missing CELL_TITLE entries")
+        # Confirm the preset is recorded so load_session re-applies it
+        self.assertIn("win: main-horizontal", yaml_text,
+                      "main-horizontal preset not detected at save time")
+
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+        after_load_titles = self._titles_in_visual_order(self.fx.load_sock)
+
+        # Simulate user pressing `prefix S H` (apply main-horizontal again)
+        tmux(self.fx.load_sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "20", env=env)
+        tmux(self.fx.load_sock, "select-layout", "-t", "rt:win",
+             "main-horizontal", env=env)
+        time.sleep(0.2)
+        after_reapply_titles = self._titles_in_visual_order(self.fx.load_sock)
+
+        self.assertEqual(expected, after_load_titles,
+                         f"titles scrambled after load:\n"
+                         f"  expected: {expected}\n"
+                         f"  got:      {after_load_titles}")
+        self.assertEqual(expected, after_reapply_titles,
+                         f"titles scrambled after re-apply:\n"
+                         f"  expected: {expected}\n"
+                         f"  got:      {after_reapply_titles}")
 
 
 if __name__ == "__main__":

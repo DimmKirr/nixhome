@@ -94,7 +94,7 @@
 
   masApps = {
     # "Slack" = 803453959; # pinned — mas 6.x removed 'get' command, install manually via App Store
-    # "Telegram" = 747648890; # pinned — mas upgrade fails, App Store version is current # TODO: review if pin is still required
+    "Telegram" = 747648890;
     # "Yubikey Authenticator" = 1497506650; # pinned at 7.3.0 — mas tries to upgrade to 7.3.2 which isn't available yet # TODO: review if pin is still required
 #    "1Password Safari" = 1569813296; # Pinned
     # Re-enabled after mas overlay (nixpkgs-unstable.mas 7.x) added in

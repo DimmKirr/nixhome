@@ -38,7 +38,7 @@ INTERPRETERS = {
 
 @dataclasses.dataclass(frozen=True)
 class Pane:
-    pane_id: str         # "%17" — server-global
+    pane_id: str         # "%17" — server-global, re-minted per tmux server
     pane_index: int      # window-local, may be sparse
     top: int
     left: int
@@ -49,11 +49,19 @@ class Pane:
     focus: bool
     cwd: str
     title: str = ""      # `select-pane -T` value, empty if untitled
+    persistent_cell_id: str = ""  # CELL_ID env var read from the pane process
 
     @property
     def cell_id(self) -> str:
-        # pane_id without the leading '%'
-        return self.pane_id.lstrip("%")
+        """Stable per-pane identifier.
+
+        If the pane was created by tmuxp from a previous snapshot, its
+        process inherits CELL_ID from the YAML's `environment:` block —
+        we prefer that so the ID survives across arbitrarily many
+        save/reload cycles. Otherwise (brand-new pane) we mint a fresh
+        ID from `pane_id` minus the leading '%'.
+        """
+        return self.persistent_cell_id or self.pane_id.lstrip("%")
 
     @property
     def is_repl(self) -> bool:
@@ -147,6 +155,43 @@ def query_session(name: str, socket: str | None = None) -> Session:
     return Session(name=name, windows=tuple(windows))
 
 
+def _read_pane_env(pane_pid: str, var: str) -> str:
+    """Read a single env var from a pane's process initial environment.
+
+    tmux doesn't expose pane env directly. We read the OS-level initial
+    environment of the pane's child process (the shell tmuxp spawned).
+    Returns "" if the var is unset, the process is gone, or the platform
+    has neither /proc nor BSD `ps -E`.
+    """
+    if not pane_pid or not pane_pid.isdigit():
+        return ""
+    # Linux: /proc/<pid>/environ is NUL-separated KEY=VAL pairs.
+    proc_environ = Path(f"/proc/{pane_pid}/environ")
+    if proc_environ.exists():
+        try:
+            data = proc_environ.read_bytes()
+        except (OSError, PermissionError):
+            return ""
+        prefix = f"{var}=".encode()
+        for entry in data.split(b"\0"):
+            if entry.startswith(prefix):
+                return entry[len(prefix):].decode("utf-8", errors="replace")
+        return ""
+    # macOS / BSD fallback: `ps -E` prints initial env after the command.
+    try:
+        out = subprocess.run(
+            ["ps", "-E", "-ww", "-o", "command=", "-p", pane_pid],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    prefix = f"{var}="
+    for tok in out.split():
+        if tok.startswith(prefix):
+            return tok[len(prefix):]
+    return ""
+
+
 def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
     """Query panes for a window by window_id (@N) — dot-in-name safe."""
     pane_fmt = SEP.join([
@@ -161,13 +206,15 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
         "#{?pane_active,1,0}",
         "#{pane_current_path}",
         "#{pane_title}",
+        "#{pane_pid}",
     ])
     raw = _tmux(socket, "list-panes", "-t", window_id, "-F", pane_fmt)
     panes: list[Pane] = []
     for line in raw.splitlines():
         if not line:
             continue
-        pid, pidx, top, left, w, h, cur, start, active, cwd, title = line.split(SEP, 10)
+        pid, pidx, top, left, w, h, cur, start, active, cwd, title, ppid = \
+            line.split(SEP, 11)
         panes.append(Pane(
             pane_id=pid,
             pane_index=int(pidx),
@@ -180,6 +227,7 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
             focus=(active == "1"),
             cwd=cwd,
             title=title,
+            persistent_cell_id=_read_pane_env(ppid, "CELL_ID"),
         ))
     # Sort by pane_index, NOT visual position.
     #
@@ -413,6 +461,76 @@ def detect_preset_layout(layout: str,
     return None
 
 
+# ------------------------------------------------------------------ layout rewrite (mirrored fix)
+
+
+def _layout_checksum(body: str) -> str:
+    """tmux's layout checksum: right-rotate-1 + add, mod 16-bit."""
+    c = 0
+    for ch in body.encode():
+        c = ((c >> 1) | ((c & 1) << 15)) & 0xFFFF
+        c = (c + ch) & 0xFFFF
+    return f"{c:04x}"
+
+
+def _reverse_root_children(layout: str) -> str:
+    """Swap the top-level children of `[...]` or `{...}`; recompute checksum.
+
+    For `*-mirrored` presets the main pane is the LAST DFS leaf (e.g.
+    `[{secondaries}, main_leaf]`). tmuxp substitutes YAML[i] → DFS[i],
+    so pane_index 0 after load ends up at DFS[0] (a secondary slot), NOT
+    main. A later `select-layout main-*-mirrored` (e.g. `prefix S h`)
+    forces pane_index 0 to the main slot, scrambling content.
+
+    Reversing the root children makes the main leaf DFS[0], and the
+    save-side pane reorder puts the main pane at YAML[0]. Together,
+    pane_index 0 ≡ main pane both during the byte-exact load and after
+    any subsequent re-apply.
+    """
+    body = re.sub(r"^[0-9a-f]{4},", "", layout)
+    m = re.match(r"^(\d+x\d+,\d+,\d+)([\[\{])(.*)([\]\}])$", body)
+    if not m:
+        return layout
+    prefix, opener, inner, closer = m.groups()
+    try:
+        children = _split_top_level_children(inner)
+    except ValueError:
+        return layout
+    if len(children) < 2:
+        return layout
+    new_inner = ",".join(reversed(children))
+    new_body = f"{prefix}{opener}{new_inner}{closer}"
+    return f"{_layout_checksum(new_body)},{new_body}"
+
+
+def _rewrite_for_mirrored(preset: str, layout: str, panes: tuple[Pane, ...]
+                          ) -> tuple[str, tuple[Pane, ...]]:
+    """Apply the mirrored-preset transform: main pane → DFS[0] and YAML[0].
+
+    The main pane is identified by *geometry*, not by pane_index position
+    in the sorted list. tmux's pane_index ordering doesn't always put main
+    first (e.g. user-loaded fixtures), and doesn't always put main last
+    either (e.g. fresh `select-layout main-*-mirrored` puts pane_index 0
+    at the main slot). Geometry is the only stable signal.
+    """
+    if len(panes) < 2:
+        return layout, panes
+    new_layout = _reverse_root_children(layout)
+    if new_layout == layout:
+        return layout, panes
+    if preset == "main-horizontal-mirrored":
+        # Main is at the bottom → largest pane_top.
+        main_idx = max(range(len(panes)), key=lambda i: panes[i].top)
+    elif preset == "main-vertical-mirrored":
+        # Main is on the right → largest pane_left.
+        main_idx = max(range(len(panes)), key=lambda i: panes[i].left)
+    else:
+        return layout, panes
+    main = panes[main_idx]
+    others = tuple(p for i, p in enumerate(panes) if i != main_idx)
+    return new_layout, (main,) + others
+
+
 # ------------------------------------------------------------------ YAML emit
 
 # Hand-rolled emitter — keeps layout strings byte-for-byte and avoids a
@@ -487,10 +605,22 @@ def emit_yaml(session: Session,
             lines.append(f"{prefix}{key}: {val}")
             first_line_emitted = True
 
+        # For canonical `*-mirrored` presets, rewrite both the layout (root
+        # children reversed) and the pane list (main pane hoisted to YAML[0])
+        # so pane_index 0 lines up with the main slot through both the
+        # tmuxp DFS substitution AND any later `select-layout` re-apply.
+        # Non-mirrored layouts already satisfy this naturally.
+        layout_out = w.layout
+        panes_out = w.panes
+        preset = presets.get(w.name)
+        if preset and preset.endswith("-mirrored"):
+            layout_out, panes_out = _rewrite_for_mirrored(
+                preset, w.layout, w.panes)
+
         if w.focus:
             add("focus", "'true'")
         # layout string is plain — never quote it (tmuxp parses both).
-        add("layout", w.layout)
+        add("layout", layout_out)
         # options
         if w.options:
             add("options", "")
@@ -499,12 +629,13 @@ def emit_yaml(session: Session,
         else:
             add("options", "{}")
 
-        # Panes in pane_index order — see _query_panes for why. REPLs are
-        # kept (layout integrity) but their shell_command is replaced with
-        # the default shell, see Pane.shell_command.
-        if w.panes:
+        # Panes in pane_index order (with `*-mirrored` adjusted to put the
+        # main pane first — see _rewrite_for_mirrored). REPLs keep their
+        # slot but their shell_command is replaced with the default shell,
+        # see Pane.shell_command.
+        if panes_out:
             add("panes", "")
-            for p in w.panes:
+            for p in panes_out:
                 _emit_pane(lines, p)
         else:
             add("panes", "[]")

@@ -1,0 +1,23 @@
+p       Copy full path to clipboard
+        if command -v pbcopy >/dev/null 2>&1; then printf %%s "%d/%f" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then printf %%s "%d/%f" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then printf %%s "%d/%f" | xclip -selection clipboard
+        elif command -v xsel >/dev/null 2>&1; then printf %%s "%d/%f" | xsel -ib
+        else echo "no clipboard tool found (pbcopy/wl-copy/xclip/xsel)"; sleep 2
+        fi
+
+P       Copy filename only to clipboard
+        if command -v pbcopy >/dev/null 2>&1; then printf %%s "%f" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then printf %%s "%f" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then printf %%s "%f" | xclip -selection clipboard
+        elif command -v xsel >/dev/null 2>&1; then printf %%s "%f" | xsel -ib
+        else echo "no clipboard tool found"; sleep 2
+        fi
+
+d       Copy current directory to clipboard
+        if command -v pbcopy >/dev/null 2>&1; then printf %%s "%d" | pbcopy
+        elif command -v wl-copy >/dev/null 2>&1; then printf %%s "%d" | wl-copy
+        elif command -v xclip >/dev/null 2>&1; then printf %%s "%d" | xclip -selection clipboard
+        elif command -v xsel >/dev/null 2>&1; then printf %%s "%d" | xsel -ib
+        else echo "no clipboard tool found"; sleep 2
+        fi

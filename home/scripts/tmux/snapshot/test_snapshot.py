@@ -9,12 +9,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -882,7 +884,10 @@ class UserFixtureTests(unittest.TestCase):
         self._td.cleanup()
 
     def _load(self, yaml_path: Path) -> None:
-        tmuxp_load(self.fx.load_sock, yaml_path, env=self.fx.env)
+        # Use snap.load_session (not bare tmuxp_load) — it honors the
+        # `preset_layouts:` block and post-load re-applies main-* presets,
+        # which is the round-trip path real users hit via `tmuxsave/load`.
+        snap.load_session(yaml_path, socket=self.fx.load_sock, env=self.fx.env)
         time.sleep(0.8)
 
     def _panes_visual(self, window: str) -> list:
@@ -910,10 +915,11 @@ class UserFixtureTests(unittest.TestCase):
     def test_as_saved_yaml_loads_with_correct_visual_order(self):
         """Sanity: the saved fixture round-trips visually correctly.
 
-        nixhome window has mirrored shape: top-left (CELL_ID 111),
-        top-right (112), bottom strip (110). YAML emit was visual order
-        so YAML[0]=111, [1]=112, [2]=110. tmuxp maps YAML[i]→layout DFS
-        leaf[i], which equals visual order, so the load should look right.
+        nixhome window has mirrored shape: top-left=111, top-right=112,
+        bottom (main)=110. The fixture is in the post-fix emit format —
+        YAML[0] is the main pane (110) and the layout's root children are
+        reversed — so snap.load_session's post-load re-apply lands content
+        in the canonical visual slots.
         """
         self._load(FIXTURE_DIR / "NMD-saved.yaml")
         panes = self._panes_visual("nixhome")
@@ -923,14 +929,17 @@ class UserFixtureTests(unittest.TestCase):
                          "visual round-trip broken: nixhome panes "
                          "should be top-left=111, top-right=112, bottom=110")
 
-    @unittest.expectedFailure
-    def test_as_saved_yaml_breaks_on_reapply_main_horizontal_mirrored(self):
-        """The user-reported bug. Re-applying the preset scrambles panes.
+    def test_reapply_main_horizontal_mirrored_after_load_keeps_main_at_bottom(self):
+        """Regression for the user-reported scramble.
 
-        After load: pane_index 0 = first YAML pane (CELL_ID 111, originally
-        top-left). select-layout main-horizontal-mirrored puts pane_index 0
-        in the main slot (bottom). Original top-left content moves to bottom,
-        breaking the user's mental model.
+        Pressing `prefix S h` (manual re-apply of main-horizontal-mirrored)
+        after a load must NOT move the original main-slot pane out of the
+        bottom slot. Pre-fix, save sorted by pane_index put a secondary
+        pane at YAML[0]; tmuxp made it pane_index 0; then the re-apply
+        forced THAT pane (not the original main) into the main slot,
+        scrambling content. Fix: emit_yaml hoists the main pane to YAML[0]
+        and reverses the layout's root children for *-mirrored presets,
+        so pane_index 0 ↔ main role survives load + arbitrary re-apply.
         """
         self._load(FIXTURE_DIR / "NMD-saved.yaml")
         env = self.fx.env
@@ -941,100 +950,36 @@ class UserFixtureTests(unittest.TestCase):
         time.sleep(0.3)
         panes = self._panes_visual("nixhome")
         cell_ids = [self._read_cell_id(pid) for *_, pid in panes]
-        # If pane_index↔role were preserved, the bottom strip would still
-        # be 110 after re-apply. Bug: it isn't.
         self.assertEqual(cell_ids[2], "110",
                          "bottom slot after re-apply should still be CELL_ID 110")
 
-    def test_handcrafted_yaml_plus_reapply_preserves_roles_and_visual(self):
-        """Proof of the viable workflow: pane_index-order YAML + post-load
-        re-apply of the preset layout produces correct visual AND correct
-        pane_index↔role mapping.
-
-        Why post-load re-apply is required: tmux's layout parser ignores
-        the X,Y coordinates in custom layout strings and recomputes
-        geometry from declaration order — first child at top, second
-        below, etc. So reordering the YAML children alone misplaces
-        panes visually. But it DOES put pane_index 0 at the original
-        main role, so a single `select-layout main-horizontal-mirrored`
-        post-load reflows everything correctly.
-
-        Implication: the architectural fix isn't just emit-order — the
-        snapshot tool needs to also save the active preset and replay
-        it on load.
+    def test_repeated_reapply_is_idempotent_for_mirrored_layout(self):
+        """Pressing `prefix S h` multiple times must not drift content
+        across visual slots. Pane_index 0 ↔ main pane is invariant under
+        repeated `select-layout main-horizontal-mirrored`, which keeps
+        the result stable across any number of re-applies.
         """
-        src = (FIXTURE_DIR / "NMD-saved.yaml").read_text()
+        self._load(FIXTURE_DIR / "NMD-saved.yaml")
 
-        # Rewrite only the nixhome window: reverse the layout's root
-        # children + reverse the panes list so the bottom strip is first.
-        # (The other mirrored windows are unchanged for this focused test.)
-        old_layout = "7be3,222x53,0,0[222x50,0,0{111x50,0,0,111,110x50,112,0,112},222x2,0,51,110]"
-        new_layout = reverse_root_children(old_layout)
-        self.assertNotEqual(old_layout, new_layout)
-        # New DFS leaf order: bottom strip (110), then top-left (111), top-right (112)
-
-        modified = src.replace(old_layout, new_layout)
-
-        # Reorder the nixhome panes block so YAML order matches new DFS:
-        # [110 (bottom), 111 (top-left), 112 (top-right)]
-        old_panes_block = (
-            "    panes:\n"
-            "    - focus: 'true'\n"
-            "      shell_command: /bin/sh\n"
-            "      environment:\n"
-            "        CELL_ID: '111'\n"
-            "    - shell_command: /bin/sh\n"
-            "      environment:\n"
-            "        CELL_ID: '112'\n"
-            "    - shell_command: /bin/sh\n"
-            "      environment:\n"
-            "        CELL_ID: '110'\n"
-        )
-        new_panes_block = (
-            "    panes:\n"
-            "    - shell_command: /bin/sh\n"
-            "      environment:\n"
-            "        CELL_ID: '110'\n"
-            "    - focus: 'true'\n"
-            "      shell_command: /bin/sh\n"
-            "      environment:\n"
-            "        CELL_ID: '111'\n"
-            "    - shell_command: /bin/sh\n"
-            "      environment:\n"
-            "        CELL_ID: '112'\n"
-        )
-        self.assertIn(old_panes_block, modified)
-        modified = modified.replace(old_panes_block, new_panes_block)
-
-        out = self.work / "NMD-fixed.yaml"
-        out.write_text(modified)
-
-        self._load(out)
-
-        # Post-load re-apply of the preset (the workflow this test proves).
         env = self.fx.env
         tmux(self.fx.load_sock, "set-window-option", "-t", "NMD:nixhome",
              "main-pane-height", "2", env=env)
         tmux(self.fx.load_sock, "select-layout", "-t", "NMD:nixhome",
              "main-horizontal-mirrored", env=env)
         time.sleep(0.3)
+        cell_ids_first = [self._read_cell_id(pid)
+                          for *_, pid in self._panes_visual("nixhome")]
+        self.assertEqual(cell_ids_first, ["111", "112", "110"],
+                         f"first re-apply scrambled visuals: {cell_ids_first}")
 
-        # Visual order: top-left=111, top-right=112, bottom=110 (mirrored).
-        # Re-applying preset is now idempotent because pane_index↔role is
-        # correct: pane 0 = CELL_ID 110 (the original main).
-        panes = self._panes_visual("nixhome")
-        cell_ids = [self._read_cell_id(pid) for *_, pid in panes]
-        self.assertEqual(cell_ids, ["111", "112", "110"],
-                         f"post-reapply visual wrong: {cell_ids}")
-
-        # Idempotent: a second re-apply must produce the same result.
+        # Second re-apply: must be a no-op visually.
         tmux(self.fx.load_sock, "select-layout", "-t", "NMD:nixhome",
              "main-horizontal-mirrored", env=env)
         time.sleep(0.2)
-        panes2 = self._panes_visual("nixhome")
-        cell_ids2 = [self._read_cell_id(pid) for *_, pid in panes2]
-        self.assertEqual(cell_ids, cell_ids2,
-                         f"second re-apply not idempotent: {cell_ids2}")
+        cell_ids_second = [self._read_cell_id(pid)
+                           for *_, pid in self._panes_visual("nixhome")]
+        self.assertEqual(cell_ids_first, cell_ids_second,
+                         f"second re-apply not idempotent: {cell_ids_second}")
 
 
 class ManifestTests(unittest.TestCase):
@@ -1280,6 +1225,547 @@ class PaneTitleRoundTripTests(unittest.TestCase):
                          f"titles scrambled after re-apply:\n"
                          f"  expected: {expected}\n"
                          f"  got:      {after_reapply_titles}")
+
+
+class CellIdStabilityTests(unittest.TestCase):
+    """Regression: CELL_IDs in saved YAML must be stable across consecutive
+    saves of the same continuously-alive session — including saves
+    separated by a preset-layout re-apply.
+
+    Lineage observed in .context/tmuxp-debug/NMD-*.yml:
+        T1 (14:15, applied-layout-and-saved):       CELL_IDs 816..838
+        T2 (14:19, snapshot-loaded-and-existing):   CELL_IDs 816..838  (stable)
+        T3 (14:20, layout-applied-snapshot-saved):  CELL_IDs 850..872  (all changed)
+
+    Cell-IDs are `pane_id.lstrip('%')` (see snapshot.Pane.cell_id), so any
+    change in CELL_ID across saves means tmux destroyed/recreated panes.
+    `select-layout` is documented as geometry-only; CELL_IDs MUST survive it.
+    """
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    @staticmethod
+    def _cell_ids(yaml_text: str) -> list[str]:
+        return re.findall(r"CELL_ID:\s*'(\d+)'", yaml_text)
+
+    def _snapshot_copy(self, label: str) -> tuple[Path, str]:
+        """Save the session and copy YAML aside (save_session overwrites)."""
+        target = snap.save_session("rt", socket=self.fx.sock,
+                                   out_dir=self.fx.yaml_dir)
+        text = target.read_text()
+        aside = self.work / f"snap-{label}.yaml"
+        aside.write_text(text)
+        return aside, text
+
+    def _build_mirrored_session(self) -> None:
+        """3-pane main-horizontal-mirrored on `rt:win`."""
+        sock = self.fx.sock
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+
+    def test_cell_ids_stable_across_consecutive_no_op_saves(self):
+        """Two back-to-back saves of an idle session: CELL_IDs identical."""
+        self._build_mirrored_session()
+
+        _, text_a = self._snapshot_copy("A")
+        _, text_b = self._snapshot_copy("B")
+
+        ids_a = self._cell_ids(text_a)
+        ids_b = self._cell_ids(text_b)
+        self.assertEqual(ids_a, ids_b,
+                         f"CELL_IDs changed between two no-op saves:\n"
+                         f"  A: {ids_a}\n  B: {ids_b}")
+        self.assertEqual(len(ids_a), 3, f"expected 3 CELL_IDs, got {ids_a}")
+
+    def test_cell_ids_stable_across_preset_layout_reapply(self):
+        """Re-applying `main-horizontal-mirrored` between saves must not
+        change CELL_IDs — `select-layout` is a geometry-only op.
+
+        This is the lineage T2→T3 from the debug YAMLs: same session,
+        layout re-applied between saves, all 23 CELL_IDs shifted by +34.
+        """
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_mirrored_session()
+
+        _, text_a = self._snapshot_copy("A")
+
+        # Re-apply the same preset. Geometry-only — pane identity must hold.
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.1)
+
+        _, text_b = self._snapshot_copy("B")
+
+        # And once more, to catch any drift that only shows after 2+ re-applies.
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.1)
+        _, text_c = self._snapshot_copy("C")
+
+        ids_a = self._cell_ids(text_a)
+        ids_b = self._cell_ids(text_b)
+        ids_c = self._cell_ids(text_c)
+
+        self.assertEqual(ids_a, ids_b,
+                         f"CELL_IDs changed across a single preset re-apply:\n"
+                         f"  before: {ids_a}\n  after:  {ids_b}\n"
+                         f"  delta:  {[int(b) - int(a) for a, b in zip(ids_a, ids_b)]}")
+        self.assertEqual(ids_a, ids_c,
+                         f"CELL_IDs drifted across two preset re-applies:\n"
+                         f"  T0: {ids_a}\n  T2: {ids_c}")
+
+    def test_cell_ids_stable_across_multi_window_lineage(self):
+        """Mirrors the NMD debug lineage: multiple windows, each with a
+        canonical mirrored layout. Save → re-apply each window's preset
+        → save. CELL_IDs must be identical across the two saves.
+
+        Catches the regression where re-applying the layout to several
+        windows in sequence (as `snap.load_session` does post-load)
+        re-creates panes and shifts every CELL_ID by a constant offset.
+        """
+        sock = self.fx.sock
+        env = self.fx.env
+
+        windows = ["pve", "omv", "play"]
+        # Build first window via new-session, then new-window for the rest.
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", windows[0], env=env)
+        for wname in windows[1:]:
+            tmux(sock, "new-window", "-t", "rt:", "-n", wname, env=env)
+
+        # Give each window a 3-pane mirrored layout.
+        for wname in windows:
+            target_win = f"rt:{wname}"
+            tmux(sock, "split-window", "-v", "-t", target_win, env=env)
+            top_pane = tmux(sock, "list-panes", "-t", target_win,
+                            "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+            top_id = sorted((int(l.split()[0]), l.split()[1])
+                            for l in top_pane if l)[0][1]
+            tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+            tmux(sock, "set-window-option", "-t", target_win,
+                 "main-pane-height", "2", env=env)
+            tmux(sock, "select-layout", "-t", target_win,
+                 "main-horizontal-mirrored", env=env)
+
+        _, text_a = self._snapshot_copy("A")
+
+        # Re-apply preset on every window — same op `snap.load_session`
+        # performs after tmuxp finishes loading.
+        for wname in windows:
+            tmux(sock, "select-layout", "-t", f"rt:{wname}",
+                 "main-horizontal-mirrored", env=env)
+        time.sleep(0.1)
+
+        _, text_b = self._snapshot_copy("B")
+
+        ids_a = self._cell_ids(text_a)
+        ids_b = self._cell_ids(text_b)
+        self.assertEqual(len(ids_a), 9,
+                         f"expected 9 CELL_IDs (3 windows × 3 panes): {ids_a}")
+        self.assertEqual(ids_a, ids_b,
+                         f"multi-window lineage lost CELL_ID stability:\n"
+                         f"  before: {ids_a}\n  after:  {ids_b}\n"
+                         f"  deltas: {[int(b) - int(a) for a, b in zip(ids_a, ids_b)]}")
+
+
+class CellIdLoadLineageTests(unittest.TestCase):
+    """CELL_IDs must be sticky to a pane across snapshot reloads.
+
+    The pane's running process is the "cell" — software that re-execs
+    itself (or that the user re-runs) needs a stable identifier across
+    tmuxp reloads so it can recognise it's continuing a previous cell.
+
+    Today CELL_ID is derived from tmux's live `%pane_id`, which is
+    re-minted by tmux every time tmuxp creates a fresh pane. So the
+    saved YAML's CELL_ID drifts on every reload.
+
+    These tests pin the contract: a single CELL_ID per pane, persistent
+    across an arbitrary number of save → reload → save cycles.
+    """
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+        # Extra sockets so we can do multi-hop reloads (each tmuxp load
+        # needs its own server to mimic real reload semantics).
+        self.sock_b = str(self.work / "sock_b")
+        self.sock_c = str(self.work / "sock_c")
+
+    def tearDown(self):
+        for s in (self.sock_b, self.sock_c):
+            subprocess.run(["tmux", "-S", s, "kill-server"],
+                           capture_output=True)
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    @staticmethod
+    def _cell_ids(yaml_text: str) -> list[str]:
+        return re.findall(r"CELL_ID:\s*'(\d+)'", yaml_text)
+
+    def _save_to(self, sock: str, dest: Path) -> str:
+        """Save session 'rt' on `sock` and copy the YAML to `dest`."""
+        out_dir = dest.parent / f"yaml-{dest.stem}"
+        out_dir.mkdir(exist_ok=True)
+        target = snap.save_session("rt", socket=sock, out_dir=out_dir)
+        text = target.read_text()
+        dest.write_text(text)
+        return text
+
+    def _build_session(self, sock: str) -> None:
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+
+    def test_cell_ids_survive_primary_reload(self):
+        """One reload: build → save → reload elsewhere → save.
+        Both saves must agree on CELL_IDs.
+        """
+        env = self.fx.env
+        self._build_session(self.fx.sock)
+
+        yaml0 = self.work / "rt-0.yaml"
+        text0 = self._save_to(self.fx.sock, yaml0)
+        ids0 = self._cell_ids(text0)
+        self.assertEqual(len(ids0), 3, ids0)
+
+        tmux(self.fx.sock, "kill-server", env=env, check=False)
+        snap.load_session(yaml0, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+
+        yaml1 = self.work / "rt-1.yaml"
+        text1 = self._save_to(self.fx.load_sock, yaml1)
+        ids1 = self._cell_ids(text1)
+
+        self.assertEqual(ids0, ids1,
+                         f"CELL_IDs drifted across one reload:\n"
+                         f"  pre-reload:  {ids0}\n"
+                         f"  post-reload: {ids1}")
+
+    def test_cell_ids_survive_secondary_reload(self):
+        """Two reloads. CELL_IDs must equal the original across both."""
+        env = self.fx.env
+        self._build_session(self.fx.sock)
+
+        yaml0 = self.work / "rt-0.yaml"
+        text0 = self._save_to(self.fx.sock, yaml0)
+        ids0 = self._cell_ids(text0)
+
+        tmux(self.fx.sock, "kill-server", env=env, check=False)
+        snap.load_session(yaml0, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+        yaml1 = self.work / "rt-1.yaml"
+        text1 = self._save_to(self.fx.load_sock, yaml1)
+        ids1 = self._cell_ids(text1)
+
+        tmux(self.fx.load_sock, "kill-server", env=env, check=False)
+        snap.load_session(yaml1, socket=self.sock_b, env=env)
+        time.sleep(0.6)
+        yaml2 = self.work / "rt-2.yaml"
+        text2 = self._save_to(self.sock_b, yaml2)
+        ids2 = self._cell_ids(text2)
+
+        self.assertEqual(ids0, ids1, "drifted on first reload")
+        self.assertEqual(ids0, ids2,
+                         f"drifted on second reload:\n"
+                         f"  original: {ids0}\n"
+                         f"  reload#2: {ids2}")
+
+    def test_cell_ids_survive_tertiary_reload(self):
+        """Three reloads. CELL_IDs must equal the original across all."""
+        env = self.fx.env
+        self._build_session(self.fx.sock)
+
+        yaml0 = self.work / "rt-0.yaml"
+        text0 = self._save_to(self.fx.sock, yaml0)
+        ids0 = self._cell_ids(text0)
+
+        sockets = [self.fx.sock, self.fx.load_sock, self.sock_b, self.sock_c]
+        yamls = [yaml0]
+        all_ids = [ids0]
+        for hop in range(3):
+            tmux(sockets[hop], "kill-server", env=env, check=False)
+            snap.load_session(yamls[-1], socket=sockets[hop + 1], env=env)
+            time.sleep(0.6)
+            y = self.work / f"rt-{hop + 1}.yaml"
+            text = self._save_to(sockets[hop + 1], y)
+            yamls.append(y)
+            all_ids.append(self._cell_ids(text))
+
+        for hop, ids in enumerate(all_ids):
+            self.assertEqual(ids0, ids,
+                             f"CELL_IDs drifted at hop {hop}:\n"
+                             f"  original (hop 0): {ids0}\n"
+                             f"  hop {hop}:        {ids}")
+
+
+class CellIdFollowsPaneTests(unittest.TestCase):
+    """CELL_ID must follow the pane process, not the visual slot.
+
+    If the user (or a layout op) moves a pane to a different position,
+    the CELL_ID at the NEW position is the moved pane's original ID —
+    not a fresh one and not the previous occupant's ID.
+    """
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    @staticmethod
+    def _cell_id_for_pane(yaml_text: str, pane_index: int) -> str:
+        """Pull the CELL_ID of the Nth pane in YAML order (per first
+        `panes:` block — first window only, single-window tests)."""
+        ids = re.findall(r"CELL_ID:\s*'(\d+)'", yaml_text)
+        return ids[pane_index]
+
+    def _save(self, sock: str, label: str) -> str:
+        out_dir = self.work / f"yaml-{label}"
+        out_dir.mkdir(exist_ok=True)
+        return snap.save_session("rt", socket=sock, out_dir=out_dir).read_text()
+
+    def _build_3pane_mirrored(self, sock: str) -> None:
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+
+    def _build_3pane_mirrored_loaded(self) -> str:
+        """Build, save, reload — so panes have *persistent* CELL_IDs
+        (set via tmuxp's environment block). Returns the load socket.
+        Tests use the loaded session to prove CELL_IDs follow panes,
+        not just freshly-minted-from-pane_id values that would coincidentally
+        survive every op.
+        """
+        env = self.fx.env
+        self._build_3pane_mirrored(self.fx.sock)
+        target = snap.save_session("rt", socket=self.fx.sock,
+                                   out_dir=self.fx.yaml_dir)
+        tmux(self.fx.sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+        return self.fx.load_sock
+
+    def _panes_by_position(self, sock: str) -> list[tuple[int, int, str]]:
+        """[(top, left, pane_id), ...] sorted by visual position."""
+        env = self.fx.env
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_top} #{pane_left} #{pane_id}",
+                   env=env).splitlines()
+        return sorted((int(t), int(l), pid)
+                      for t, l, pid in (ln.split() for ln in raw if ln.strip()))
+
+    def _save_and_map(self, sock: str, label: str) -> dict[str, str]:
+        """Save, then return {pane_id: CELL_ID} read directly from live tmux."""
+        # Save (writes YAML) but we don't need it; read CELL_IDs from the
+        # live session via snap.query_session, which is what save_session
+        # uses internally — this avoids YAML order coupling.
+        self._save(sock, label)
+        sess = snap.query_session("rt", socket=sock)
+        out: dict[str, str] = {}
+        for w in sess.windows:
+            for p in w.panes:
+                out[p.pane_id] = p.cell_id
+        return out
+
+    def test_cell_id_follows_pane_through_swap(self):
+        """`tmux swap-pane` reorders panes; CELL_IDs must travel with
+        the pane process, not stay at the visual position."""
+        sock = self._build_3pane_mirrored_loaded()
+        env = self.fx.env
+
+        before = self._panes_by_position(sock)
+        # Take pane_ids at top-left (index 0) and bottom (index 2)
+        tl_pid_before = before[0][2]
+        bot_pid_before = before[2][2]
+
+        before_map = self._save_and_map(sock, "pre")
+        tl_cell_before = before_map[tl_pid_before]
+        bot_cell_before = before_map[bot_pid_before]
+        self.assertNotEqual(tl_cell_before, bot_cell_before, "sanity")
+
+        # Swap top-left with bottom.
+        tmux(sock, "swap-pane", "-s", tl_pid_before, "-t", bot_pid_before,
+             env=env)
+        time.sleep(0.1)
+
+        after_map = self._save_and_map(sock, "post")
+        # Same pane_ids exist (swap doesn't destroy/create), and each
+        # carries the same CELL_ID it had before — the pane process is
+        # unchanged, only its visual slot moved.
+        self.assertEqual(before_map, after_map,
+                         f"CELL_IDs changed across swap-pane:\n"
+                         f"  before: {before_map}\n"
+                         f"  after:  {after_map}")
+
+        # And the CELL_ID at the visual top-left slot is now the one
+        # that moved there — not the slot's old value.
+        after = self._panes_by_position(sock)
+        tl_pid_after = after[0][2]
+        self.assertEqual(tl_pid_after, bot_pid_before,
+                         "swap didn't put bottom pane at top-left")
+        self.assertEqual(after_map[tl_pid_after], bot_cell_before,
+                         "CELL_ID at top-left should now be the swapped-in "
+                         "pane's original CELL_ID")
+
+    def test_cell_id_follows_pane_through_layout_reapply(self):
+        """Re-applying a preset layout (geometry op only) must not
+        renumber CELL_IDs on a session that already has persistent ones
+        (post-reload state)."""
+        sock = self._build_3pane_mirrored_loaded()
+        env = self.fx.env
+
+        before = self._save_and_map(sock, "pre")
+
+        # Re-apply preset (the `prefix S h` action).
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.1)
+        # And rotate panes (another geometry op).
+        tmux(sock, "rotate-window", "-t", "rt:win", env=env)
+        time.sleep(0.1)
+
+        after = self._save_and_map(sock, "post")
+        self.assertEqual(before, after,
+                         f"CELL_IDs changed across layout reapply + rotate:\n"
+                         f"  before: {before}\n  after:  {after}")
+
+    def test_cell_id_follows_pane_through_resize(self):
+        """`resize-pane` is geometry only — never affects CELL_ID."""
+        sock = self._build_3pane_mirrored_loaded()
+        env = self.fx.env
+
+        before = self._save_and_map(sock, "pre")
+
+        # Pick the bottom pane (largest in mirrored layout) and shrink it.
+        bot_pid = self._panes_by_position(sock)[2][2]
+        tmux(sock, "resize-pane", "-t", bot_pid, "-y", "10", env=env)
+        time.sleep(0.1)
+
+        after = self._save_and_map(sock, "post")
+        self.assertEqual(before, after,
+                         f"CELL_IDs changed across resize-pane:\n"
+                         f"  before: {before}\n  after:  {after}")
+
+
+class ReadPaneEnvContractTests(unittest.TestCase):
+    """`_read_pane_env` must read an env var from a known child process on
+    whatever platform the tests run on. No tmux, no tmuxp — this isolates
+    the OS bridge from the rest of the pipeline.
+
+    On macOS the implementation falls back to `ps -E`, which is restricted
+    by hardened-runtime / sandbox in many setups. These tests pin the
+    contract so a regression there can't hide behind tmux fixtures.
+    """
+
+    SENTINEL = "contract_xyz_42"
+
+    def _spawn_child_with_cell_id(self, value: str) -> subprocess.Popen:
+        proc = subprocess.Popen(
+            ["sleep", "60"],
+            env={**os.environ, "CELL_ID": value},
+        )
+        time.sleep(0.1)  # let exec complete so initial environ is settled
+        return proc
+
+    def test_reads_cell_id_from_own_child_initial_environ(self):
+        """Platform-native path — uses /proc on Linux, `ps -E` on macOS.
+        REDs on macOS today; GREEN on Linux."""
+        proc = self._spawn_child_with_cell_id(self.SENTINEL)
+        try:
+            got = snap._read_pane_env(str(proc.pid), "CELL_ID")
+            self.assertEqual(
+                got, self.SENTINEL,
+                f"_read_pane_env returned {got!r} for pid {proc.pid}; "
+                f"platform fallback (/proc or ps -E) is broken",
+            )
+        finally:
+            proc.kill(); proc.wait()
+
+    @unittest.skipUnless(
+        shutil.which("ps"), "ps not available")
+    def test_reads_cell_id_via_ps_fallback(self):
+        """Force the BSD/macOS `ps -E` branch even on Linux so CI catches
+        regressions in the non-/proc code path without a Mac runner."""
+        # Probe: does `ps -E` actually surface env on this host? If the
+        # platform itself doesn't expose env via ps, skip — we'd be
+        # testing the OS, not our code.
+        probe = self._spawn_child_with_cell_id("probe_value")
+        try:
+            try:
+                out = subprocess.run(
+                    ["ps", "-E", "-ww", "-o", "command=", "-p", str(probe.pid)],
+                    capture_output=True, text=True, check=True,
+                ).stdout
+            except subprocess.CalledProcessError:
+                self.skipTest("`ps -E` not supported on this host")
+            if "CELL_ID=probe_value" not in out:
+                self.skipTest(
+                    "`ps -E` does not expose process env on this host "
+                    "(hardened runtime / sandbox / SIP)")
+        finally:
+            probe.kill(); probe.wait()
+
+        proc = self._spawn_child_with_cell_id(self.SENTINEL)
+        try:
+            # Force the ps branch by making /proc/<pid>/environ "not exist".
+            real_exists = Path.exists
+            def fake_exists(self):
+                if str(self).startswith("/proc/") and str(self).endswith("/environ"):
+                    return False
+                return real_exists(self)
+            with mock.patch.object(Path, "exists", fake_exists):
+                got = snap._read_pane_env(str(proc.pid), "CELL_ID")
+            self.assertEqual(
+                got, self.SENTINEL,
+                "ps -E fallback failed to read CELL_ID from own child",
+            )
+        finally:
+            proc.kill(); proc.wait()
 
 
 if __name__ == "__main__":

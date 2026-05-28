@@ -1,4 +1,9 @@
 session_name: NMD
+preset_layouts:
+  play: main-horizontal-mirrored
+  k3s: main-horizontal-mirrored
+  nmd.gg: main-horizontal-mirrored
+  nixhome: main-horizontal-mirrored
 windows:
   - layout: 5d43,222x53,0,0,90
     options: {}
@@ -49,26 +54,29 @@ windows:
         CELL_ID: '97'
     start_directory: /tmp
     window_name: omv
-  - layout: b4b3,222x53,0,0[222x43,0,0{111x43,0,0,98,110x43,112,0,99},222x9,0,44,100]
+  - layout: 9989,222x53,0,0[222x9,0,44,100,222x43,0,0{111x43,0,0,98,110x43,112,0,99}]
     options:
       main-pane-height: '2'
     panes:
+    - focus: 'true'
+      shell_command: /bin/sh
+      environment:
+        CELL_ID: '100'
     - shell_command: /bin/sh
       environment:
         CELL_ID: '98'
     - shell_command: /bin/sh
       environment:
         CELL_ID: '99'
-    - focus: 'true'
-      shell_command: /bin/sh
-      environment:
-        CELL_ID: '100'
     start_directory: /tmp
     window_name: play
-  - layout: 7961,222x53,0,0[222x42,0,0{111x42,0,0,101,110x42,112,0,102},222x10,0,43,103]
+  - layout: 2140,222x53,0,0[222x10,0,43,103,222x42,0,0{111x42,0,0,101,110x42,112,0,102}]
     options:
       main-pane-height: '2'
     panes:
+    - shell_command: /bin/sh
+      environment:
+        CELL_ID: '103'
     - focus: 'true'
       shell_command: /bin/sh
       environment:
@@ -76,9 +84,6 @@ windows:
     - shell_command: /bin/sh
       environment:
         CELL_ID: '102'
-    - shell_command: /bin/sh
-      environment:
-        CELL_ID: '103'
     start_directory: /tmp
     window_name: k3s
   - layout: a172,222x53,0,0[222x48,0,0{116x48,0,0,104,105x48,117,0,105},222x4,0,49,106]
@@ -97,10 +102,13 @@ windows:
         CELL_ID: '106'
     start_directory: /tmp
     window_name: n8n
-  - layout: dbeb,222x53,0,0[222x50,0,0{111x50,0,0,107,110x50,112,0,108},222x2,0,51,109]
+  - layout: 2691,222x53,0,0[222x2,0,51,109,222x50,0,0{111x50,0,0,107,110x50,112,0,108}]
     options:
       main-pane-height: '2'
     panes:
+    - shell_command: /bin/sh
+      environment:
+        CELL_ID: '109'
     - shell_command: /bin/sh
       environment:
         CELL_ID: '107'
@@ -108,16 +116,16 @@ windows:
       shell_command: /bin/sh
       environment:
         CELL_ID: '108'
-    - shell_command: /bin/sh
-      environment:
-        CELL_ID: '109'
     start_directory: /tmp
     window_name: nmd.gg
   - focus: 'true'
-    layout: 7be3,222x53,0,0[222x50,0,0{111x50,0,0,111,110x50,112,0,112},222x2,0,51,110]
+    layout: 164b,222x53,0,0[222x2,0,51,110,222x50,0,0{111x50,0,0,111,110x50,112,0,112}]
     options:
       main-pane-height: '2'
     panes:
+    - shell_command: /bin/sh
+      environment:
+        CELL_ID: '110'
     - focus: 'true'
       shell_command: /bin/sh
       environment:
@@ -125,8 +133,5 @@ windows:
     - shell_command: /bin/sh
       environment:
         CELL_ID: '112'
-    - shell_command: /bin/sh
-      environment:
-        CELL_ID: '110'
     start_directory: /tmp
     window_name: nixhome

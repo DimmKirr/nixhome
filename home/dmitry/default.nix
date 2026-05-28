@@ -84,6 +84,7 @@
   };
 
   xdg.configFile."mc/skins/dracula256.ini".source = ../programs/mc-skins/dracula256.ini;
+  xdg.configFile."mc/menu".source = ../programs/mc.menu;
   xdg.configFile."vifm/vifmrc".source = ../programs/vifm/vifmrc;
   xdg.configFile."vifm/colors".source = ../programs/vifm/colors;
 

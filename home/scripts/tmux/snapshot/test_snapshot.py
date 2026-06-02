@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -65,6 +65,23 @@ def pane_at(socket: str, session: str, top: int, left: int) -> str:
 
 def pane_content(socket: str, pane_id: str) -> str:
     return tmux(socket, "capture-pane", "-t", pane_id, "-p")
+
+
+def read_cell_id(socket: str, pane_id: str, *,
+                 env: dict | None = None) -> str:
+    """Read $CELL_ID from a pane's process env — no TTY/shell interaction.
+
+    Path: tmux format-string query (`#{pane_pid}`) → read OS process env
+    via `/proc/<pid>/environ` (Linux) or `ps -E` (macOS/BSD). Same channel
+    snapshot.py uses on the save side (`_read_pane_env`), so symmetric.
+
+    Replaces the older `send-keys 'printf @@$CELL_ID@@'` + `capture-pane`
+    + regex scrape, which required (1) a live shell with PTY echoing,
+    (2) a polling loop on the screen buffer, and (3) careful regex sync.
+    """
+    pane_pid = tmux(socket, "display-message", "-p", "-t", pane_id,
+                    "#{pane_pid}", env=env).strip()
+    return snap._read_pane_env(pane_pid, "CELL_ID")
 
 
 class TmuxFixture:
@@ -770,17 +787,10 @@ class MainHorizontalMirroredRoundTripTests(unittest.TestCase):
         )
 
     def _read_cell_id(self, sock: str, pane_id: str, env: dict) -> str:
-        """Send `echo @@$CELL_ID@@` and parse the value from the pane buffer."""
-        tmux(sock, "send-keys", "-t", pane_id,
-             'printf "@@%s@@\\n" "$CELL_ID"', "Enter", env=env)
-        for _ in range(40):
-            time.sleep(0.05)
-            buf = tmux(sock, "capture-pane", "-t", pane_id, "-p", env=env)
-            m = re.search(r"@@(\w*)@@", buf)
-            if m and m.group(1):  # non-empty match (i.e. CELL_ID was set)
-                return m.group(1)
-        raise AssertionError(
-            f"timed out reading CELL_ID from pane {pane_id}; buffer:\n{buf}")
+        # Delegates to the module helper — reads CELL_ID from the pane
+        # process's OS env (same channel snapshot.py uses), so no PTY,
+        # no shell echo polling, no buffer regex.
+        return read_cell_id(sock, pane_id, env=env)
 
 
 # ------------------------------------------------------------------ layout rewrite helpers
@@ -901,16 +911,7 @@ class UserFixtureTests(unittest.TestCase):
         )
 
     def _read_cell_id(self, pane_id: str) -> str:
-        tmux(self.fx.load_sock, "send-keys", "-t", pane_id,
-             'printf "@@%s@@\\n" "$CELL_ID"', "Enter", env=self.fx.env)
-        for _ in range(60):
-            time.sleep(0.05)
-            buf = tmux(self.fx.load_sock, "capture-pane", "-t", pane_id, "-p",
-                       env=self.fx.env)
-            m = re.search(r"@@(\w+)@@", buf)
-            if m:
-                return m.group(1)
-        raise AssertionError(f"CELL_ID not readable from {pane_id}")
+        return read_cell_id(self.fx.load_sock, pane_id, env=self.fx.env)
 
     def test_as_saved_yaml_loads_with_correct_visual_order(self):
         """Sanity: the saved fixture round-trips visually correctly.
@@ -980,6 +981,158 @@ class UserFixtureTests(unittest.TestCase):
                            for *_, pid in self._panes_visual("nixhome")]
         self.assertEqual(cell_ids_first, cell_ids_second,
                          f"second re-apply not idempotent: {cell_ids_second}")
+
+
+class LabelFixtureLoadTests(unittest.TestCase):
+    """Load a real-shape fixture that carries CELL_LABEL entries and assert
+    the labels land on the right panes in the loaded session.
+
+    The fixture (`fixtures/NMD-2026-05-31.yaml`) is a single-window
+    main-horizontal-mirrored layout — same shape as the user's live
+    `nixhome` window — with the canary mapping:
+
+        pane_index N (bottom main, CELL_ID 110)  → 'Three Renamed'
+        pane_index N+1 (top-left, CELL_ID 111)   → 'One Renamed'
+        pane_index N+2 (top-right, CELL_ID 112)  → 'Two Renamed'
+
+    (N is whichever base-index the test socket runs with — 0 or 1.)
+    """
+
+    SESSION = "NMD-2026-05-31"
+    EXPECTED_LABELS = {"One Renamed", "Two Renamed", "Three Renamed"}
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def _load(self) -> None:
+        snap.load_session(FIXTURE_DIR / "NMD-2026-05-31.yaml",
+                          socket=self.fx.load_sock, env=self.fx.env)
+        time.sleep(0.8)
+
+    def _labels_by_pane_index(self) -> dict[int, str]:
+        raw = tmux(self.fx.load_sock, "list-panes",
+                   "-t", f"{self.SESSION}:nixhome",
+                   "-F", "#{pane_index}\t#{@label}",
+                   env=self.fx.env).splitlines()
+        out: dict[int, str] = {}
+        for line in raw:
+            if not line.strip():
+                continue
+            idx, _, label = line.partition("\t")
+            out[int(idx)] = label
+        return out
+
+    def test_one_renamed_appears_in_loaded_session(self):
+        """The user's specific check: load the fixture, prove 'One Renamed'
+        is on some pane in the loaded session."""
+        self._load()
+        labels = set(self._labels_by_pane_index().values())
+        self.assertIn("One Renamed", labels,
+                      f"'One Renamed' missing — got labels: {labels}")
+
+    def test_all_canary_labels_appear_in_loaded_session(self):
+        """Stronger check: all three canary labels must land on panes."""
+        self._load()
+        labels = set(self._labels_by_pane_index().values())
+        # Drop empty strings if base-index difference creates a 4th unnamed pane
+        labels.discard("")
+        self.assertEqual(self.EXPECTED_LABELS, labels,
+                         f"label set mismatch — got: {labels}")
+
+    def test_labels_track_cell_ids(self):
+        """Strongest check: the label↔CELL_ID mapping from the YAML
+        survives load. Reads $CELL_ID from each pane's shell env (via the
+        env block) and asserts each CELL_ID lines up with its expected
+        label per the fixture."""
+        self._load()
+        # CELL_ID → expected label (from the fixture)
+        expected = {
+            "110": "Three Renamed",
+            "111": "One Renamed",
+            "112": "Two Renamed",
+        }
+        # Build pane_index → pane_id and pane_index → @label maps
+        raw = tmux(self.fx.load_sock, "list-panes",
+                   "-t", f"{self.SESSION}:nixhome",
+                   "-F", "#{pane_index}\t#{pane_id}\t#{@label}",
+                   env=self.fx.env).splitlines()
+        for line in raw:
+            if not line.strip():
+                continue
+            idx, pid, label = line.split("\t", 2)
+            # Read CELL_ID from the pane's process env directly — no
+            # shell echo polling, same channel snapshot.py uses on save.
+            cell_id = read_cell_id(self.fx.load_sock, pid, env=self.fx.env)
+            self.assertTrue(cell_id, f"CELL_ID not readable from {pid}")
+            want = expected.get(cell_id)
+            self.assertIsNotNone(want,
+                                 f"unexpected CELL_ID {cell_id} on {pid}")
+            self.assertEqual(want, label,
+                             f"pane CELL_ID={cell_id} got label "
+                             f"{label!r}, expected {want!r}")
+
+    def test_dump_loaded_session_and_grep_one_renamed(self):
+        """Load the fixture, dump the live tmux state to an ASCII file
+        under .context/tmuxp-debug/<ISO>-tmuxp-test.txt, then grep that
+        file for 'One Renamed'.
+
+        File-mediated check on purpose: same artifact format as
+        `task debug:tmuxp` so a failing test leaves a diffable dump on
+        disk, and the verification doesn't trust in-memory tmux output —
+        only what got written to the file.
+        """
+        self._load()
+
+        # Dump location: project-root .context/tmuxp-debug/<ISO>-tmuxp-test.txt.
+        # Path resolution: this test file is at
+        # <root>/home/scripts/tmux/snapshot/test_snapshot.py — climb 4
+        # parents to reach <root>.
+        project_root = Path(__file__).resolve().parents[4]
+        dump_dir = project_root / ".context" / "tmuxp-debug"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        dump_path = dump_dir / f"{stamp}-tmuxp-test.txt"
+
+        # Same per-pane format the `task debug:tmuxp` task uses (30-panes.txt).
+        # Window-by-window iteration via window_id (@N) — dotted window
+        # names break tmux's `-t session:name` parser, this fixture's
+        # `nixhome` is fine but the convention stays consistent.
+        lines: list[str] = []
+        lines.append(f"# Loaded-session dump for {self.SESSION} at {stamp}")
+        lines.append(f"# Source fixture: {FIXTURE_DIR / 'NMD-2026-05-31.yaml'}")
+        lines.append("")
+        wids = tmux(self.fx.load_sock, "list-windows",
+                    "-t", self.SESSION, "-F", "#{window_id}",
+                    env=self.fx.env).split()
+        for wid in wids:
+            wname = tmux(self.fx.load_sock, "display-message", "-p",
+                         "-t", wid, "#{window_name}",
+                         env=self.fx.env).strip()
+            lines.append(f"== {wname} ({wid}) ==")
+            panes_raw = tmux(self.fx.load_sock, "list-panes", "-t", wid,
+                             "-F", "idx=#{pane_index} id=#{pane_id} "
+                                   "top=#{pane_top} left=#{pane_left} "
+                                   "label='#{@label}' title='#{pane_title}'",
+                             env=self.fx.env)
+            lines.append(panes_raw.rstrip())
+            layout = tmux(self.fx.load_sock, "display-message", "-p",
+                          "-t", wid, "#{window_layout}",
+                          env=self.fx.env).strip()
+            lines.append(f"layout: {layout}")
+            lines.append("")
+        dump_path.write_text("\n".join(lines))
+
+        # The verification: read the dump back and grep for the canary.
+        content = dump_path.read_text()
+        self.assertIn(
+            "One Renamed", content,
+            f"'One Renamed' missing from {dump_path}\n--- dump ---\n{content}")
 
 
 class ManifestTests(unittest.TestCase):
@@ -1225,6 +1378,162 @@ class PaneTitleRoundTripTests(unittest.TestCase):
                          f"titles scrambled after re-apply:\n"
                          f"  expected: {expected}\n"
                          f"  got:      {after_reapply_titles}")
+
+
+class PaneLabelRoundTripTests(unittest.TestCase):
+    """Label-based round-trip — @label is the user-set name from the
+    "Rename Pane" menu (`prefix > n` in tmux.nix), stored as a pane-scoped
+    user option (`set -p @label "..."`). Distinct from `pane_title` which
+    is the OSC/terminal-title channel that `PaneTitleRoundTripTests` covers.
+
+    Canary mapping mirrors the live debug state captured under
+    `.context/tmuxp-debug/2026-05-30T06-40-36Z-NMD-live-post-save-with-labels.txt`:
+
+        pane_index 0 (bottom / main)  → label "Three Renamed"
+        pane_index 1 (top-left)       → label "One Renamed"
+        pane_index 2 (top-right)      → label "Two Renamed"
+
+    The deliberate idx↔label scramble (One≠0, Two≠2 in visual order)
+    means any pane-ordering regression — at save, at load, or after
+    `prefix S h` re-apply — surfaces as a wrong label in the wrong slot.
+
+    Multi-word labels with embedded spaces exercise the YAML quoting
+    round-trip (the values are single-quoted in CELL_LABEL emit).
+    """
+
+    # Visual-order expected: (top-left, top-right, bottom) for mirrored.
+    EXPECTED_VISUAL_MIRRORED = ["One Renamed", "Two Renamed", "Three Renamed"]
+    # pane_index → label assignment
+    LABELS_BY_INDEX = {0: "Three Renamed", 1: "One Renamed", 2: "Two Renamed"}
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def _visual_panes(self, sock: str) -> list:
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_top} #{pane_left} #{pane_id}",
+                   env=self.fx.env).splitlines()
+        return sorted(
+            (int(t), int(l), pid)
+            for t, l, pid in (line.split() for line in raw if line.strip())
+        )
+
+    def _labels_in_visual_order(self, sock: str) -> list[str]:
+        return [
+            tmux(sock, "display-message", "-p", "-t", pid, "#{@label}",
+                 env=self.fx.env).strip()
+            for _, _, pid in self._visual_panes(sock)
+        ]
+
+    def _indexed_panes(self, sock: str) -> list[tuple[int, str]]:
+        """Returns [(pane_index, pane_id), ...] sorted by pane_index."""
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_index} #{pane_id}",
+                   env=self.fx.env).splitlines()
+        items = []
+        for line in raw:
+            if not line.strip():
+                continue
+            idx, pid = line.split()
+            items.append((int(idx), pid))
+        items.sort(key=lambda x: x[0])
+        return items
+
+    def _apply_canary_labels(self, sock: str) -> None:
+        """Set @label per pane_index using the LABELS_BY_INDEX canary.
+
+        Uses the EXACT command the "Rename Pane" menu binding runs
+        (`set -p @label "..."`) — NOT `select-pane -T` — so we exercise
+        the same code path the user does.
+        """
+        env = self.fx.env
+        # pane_index in tmux is 0-based or 1-based depending on base-index;
+        # the fixture defaults to 0-based, so LABELS_BY_INDEX keys match.
+        idx_to_pid = dict(self._indexed_panes(sock))
+        for idx, label in self.LABELS_BY_INDEX.items():
+            pid = idx_to_pid.get(idx)
+            self.assertIsNotNone(
+                pid, f"no pane at pane_index={idx} — fixture mismatch")
+            tmux(sock, "set-option", "-p", "-t", pid, "@label", label, env=env)
+
+    def _build_three_pane_mirrored(self, sock: str) -> None:
+        """3-pane main-horizontal-mirrored: main on BOTTOM, two on top."""
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+
+    def test_save_emits_cell_label(self):
+        """Save side: snapshot YAML must contain CELL_LABEL entries for
+        each labeled pane. Direct inverse of the regression the live debug
+        captured (5055-byte YAML, 0 label hits, all panes labeled live)."""
+        sock = self.fx.sock
+        self._build_three_pane_mirrored(sock)
+        self._apply_canary_labels(sock)
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        yaml_text = target.read_text()
+
+        # All three canary labels must appear, single-quoted (spaces inside)
+        for label in self.LABELS_BY_INDEX.values():
+            self.assertIn(f"CELL_LABEL: '{label}'", yaml_text,
+                          f"label {label!r} missing from saved YAML")
+
+    def test_labels_survive_save_load_reapply(self):
+        """Full round-trip: save → kill → load → re-apply preset.
+        After each step, the three canary labels must occupy the same
+        VISUAL slots as before save."""
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_three_pane_mirrored(sock)
+        self._apply_canary_labels(sock)
+
+        before = self._labels_in_visual_order(sock)
+        self.assertEqual(self.EXPECTED_VISUAL_MIRRORED, before,
+                         "pre-save canary labels did not land as expected")
+
+        # Save
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        self.assertIn("CELL_LABEL", target.read_text(),
+                      "snapshot YAML missing CELL_LABEL entries")
+
+        # Kill + load (load_session re-applies preset + restores titles + labels)
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+        after_load = self._labels_in_visual_order(self.fx.load_sock)
+
+        # Re-apply the preset (simulates user pressing `prefix S h`).
+        tmux(self.fx.load_sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(self.fx.load_sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.2)
+        after_reapply = self._labels_in_visual_order(self.fx.load_sock)
+
+        self.assertEqual(self.EXPECTED_VISUAL_MIRRORED, after_load,
+                         f"labels scrambled after load:\n"
+                         f"  expected: {self.EXPECTED_VISUAL_MIRRORED}\n"
+                         f"  got:      {after_load}")
+        self.assertEqual(self.EXPECTED_VISUAL_MIRRORED, after_reapply,
+                         f"labels scrambled after re-apply:\n"
+                         f"  expected: {self.EXPECTED_VISUAL_MIRRORED}\n"
+                         f"  got:      {after_reapply}")
 
 
 class CellIdStabilityTests(unittest.TestCase):

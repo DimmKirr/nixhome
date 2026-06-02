@@ -3,11 +3,15 @@ version: '3'
 # Run from project root:
 #   task debug:theme       — full tmux theme/status dump
 #   task debug:theme-diff  — diff two consecutive dumps (dracula vs current)
+#   task debug:tmuxp       — dump full tmux + tmuxp state for the current session
+#                            (no args; session inferred from $TMUX)
 #
-# Dumps land under .context/tmux-theme-dump/ so Claude can read them back.
+# Dumps land under .context/tmux-theme-dump/ and .context/tmuxp-debug/ so
+# Claude can read them back.
 
 vars:
   DUMP_ROOT: '{{.ROOT_DIR}}/.context/tmux-theme-dump'
+  TMUXP_DUMP_ROOT: '{{.ROOT_DIR}}/.context/tmuxp-debug'
 
 tasks:
   debug:theme:
@@ -632,3 +636,200 @@ tasks:
     cmds:
       - rm -rf {{.DUMP_ROOT}}
       - echo "wiped {{.DUMP_ROOT}}"
+
+  debug:tmuxp:
+    desc: 'Dump full tmux + tmuxp state for the current tmux session'
+    cmds:
+      - |
+        set -eu
+
+        # Session = current tmux session (must be run from inside tmux).
+        # No knobs — each invocation produces a single timestamped dump
+        # directory. Re-run as needed; older dumps stay put for diffing.
+        if [ -z "${TMUX:-}" ]; then
+          echo "ERROR: not inside tmux — run this from inside the session you want to capture." >&2
+          exit 1
+        fi
+        SESSION=$(tmux display-message -p '#S')
+
+        ROOT={{.ROOT_DIR}}
+        STAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+        DEST={{.TMUXP_DUMP_ROOT}}/${STAMP}-${SESSION}
+        mkdir -p "$DEST"
+
+        # ─── 00-meta: tool versions, git context, tmux client info ─────────
+        # Tells future-us (and Claude) what version of every moving part
+        # produced this dump.
+        {
+          echo "session=$SESSION"
+          echo "stamp=$STAMP"
+          echo "tmux_version=$(tmux -V 2>&1)"
+          echo "tmuxp_version=$(tmuxp --version 2>&1 || echo '(tmuxp not found)')"
+          echo "tmuxp_path=$(command -v tmuxp 2>&1 || echo '(none)')"
+          echo "python_version=$(python3 --version 2>&1)"
+          SNAP_PY="$ROOT/home/scripts/tmux/snapshot/snapshot.py"
+          echo "snapshot_py=$SNAP_PY"
+          if [ -f "$SNAP_PY" ]; then
+            echo "snapshot_py_sha=$(sha256sum "$SNAP_PY" 2>/dev/null | head -c 12 || shasum -a 256 "$SNAP_PY" 2>/dev/null | head -c 12)"
+          fi
+          # TMUX env var is "$socket,$server_pid,$session_id" when inside tmux
+          echo "tmux_env=${TMUX:-(outside tmux)}"
+          echo "client_width=$(tmux display-message -p -t "$SESSION" '#{client_width}' 2>/dev/null || echo '?')"
+          echo "client_height=$(tmux display-message -p -t "$SESSION" '#{client_height}' 2>/dev/null || echo '?')"
+          echo "git_head=$(cd "$ROOT" && git rev-parse HEAD 2>/dev/null || echo '?')"
+          echo "git_branch=$(cd "$ROOT" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+          echo "git_dirty_count=$(cd "$ROOT" && git status --porcelain 2>/dev/null | wc -l | tr -d ' ') files"
+          echo "git_dirty_snapshot_py=$(cd "$ROOT" && git status --porcelain home/scripts/tmux/snapshot/ 2>/dev/null | head -5)"
+        } > "$DEST/00-meta.txt"
+
+        # ─── 10-server-globals: global @-options (incl. @layout-6..9) ──────
+        # snapshot.py persists @layout-6..9 as `custom_layouts`. Anything
+        # else in the global @-namespace is invisible to save — capture it
+        # so we know what's leaking through.
+        {
+          echo "# Global @-prefixed options (server-wide via 'set -g')"
+          echo "# snapshot.py persists @layout-6..9 only; everything else is dropped."
+          echo
+          tmux show-options -g 2>/dev/null | grep -E '^@' || echo "(no global @-options set)"
+          echo
+          echo "# Full global server-option dump (for reference / diffing)"
+          echo
+          tmux show-options -g 2>/dev/null
+        } > "$DEST/10-server-globals.txt"
+
+        # ─── 20-windows: per-window state + ALL window @-options ───────────
+        # snapshot.py persists only main-pane-{height,width} (window opts)
+        # and the layout string. ANY other @-prefixed window option (set via
+        # `set-window-option -t window`) is invisible to save.
+        {
+          echo "# Window-scope state for session $SESSION"
+          echo "# snapshot.py persists: layout, main-pane-{height,width}"
+          echo "# snapshot.py drops:    every other window option (@-namespace included)"
+          echo
+          for wid in $(tmux list-windows -t "$SESSION" -F '#{window_id}'); do
+            # Target by window_id (@N) — dotted window names (e.g. "nmd.gg")
+            # confuse tmux's `-t session:name` parser.
+            wname=$(tmux display-message -p -t "$wid" '#{window_name}')
+            wactive=$(tmux display-message -p -t "$wid" '#{window_active}')
+            wpanes=$(tmux display-message -p -t "$wid" '#{window_panes}')
+            wflags=$(tmux display-message -p -t "$wid" '#{window_flags}')
+            wzoomed=$(tmux display-message -p -t "$wid" '#{window_zoomed_flag}')
+            echo "== $wname ($wid) =="
+            echo "  active=$wactive panes=$wpanes zoomed=$wzoomed flags='$wflags'"
+            echo "  layout: $(tmux display-message -p -t "$wid" '#{window_layout}')"
+            echo "  visible-layout: $(tmux display-message -p -t "$wid" '#{window_visible_layout}')"
+            # main-pane-* (snapshot.py allowlist)
+            mph=$(tmux show-window-options -t "$wid" main-pane-height 2>/dev/null || true)
+            mpw=$(tmux show-window-options -t "$wid" main-pane-width 2>/dev/null || true)
+            [ -n "$mph" ] && echo "  $mph"
+            [ -n "$mpw" ] && echo "  $mpw"
+            # All @-prefixed window user options (currently dropped on save)
+            uopts=$(tmux show-window-options -t "$wid" 2>/dev/null | grep -E '^@' || true)
+            if [ -n "$uopts" ]; then
+              echo "  window @-options (dropped by snapshot.py):"
+              echo "$uopts" | sed 's/^/    /'
+            fi
+            echo
+          done
+        } > "$DEST/20-windows.txt"
+
+        # ─── 30-panes: full pane state + ALL pane @-options + env ──────────
+        # Per pane: every round-trip-relevant format field, plus a dump of
+        # every @-prefixed pane option (catches @label AND anything else
+        # snapshot.py misses), plus the relevant env vars (CELL_ID, CELL_TITLE)
+        # as read from /proc or `ps -E` — the same channel snapshot.py uses.
+        {
+          echo "# Pane-scope state for session $SESSION"
+          echo "# Key fields per pane:"
+          echo "#   idx        - pane_index (tmuxp ordering slot)"
+          echo "#   id         - pane_id (server-global, %N)"
+          echo "#   pid        - pane_pid (used by snapshot.py to read CELL_ID env)"
+          echo "#   top/left   - visual position"
+          echo "#   active     - focus flag"
+          echo "#   cmd        - pane_current_command (live)"
+          echo "#   start_cmd  - pane_start_command (original spawn)"
+          echo "#   cwd        - pane_current_path"
+          echo "#   @label     - user pane label (DROPPED by snapshot.py)"
+          echo "#   title      - pane_title (SAVED by snapshot.py as CELL_TITLE)"
+          echo
+          for wid in $(tmux list-windows -t "$SESSION" -F '#{window_id}'); do
+            wname=$(tmux display-message -p -t "$wid" '#{window_name}')
+            echo "== $wname ($wid) =="
+            tmux list-panes -t "$wid" -F \
+              "idx=#{pane_index} id=#{pane_id} pid=#{pane_pid} top=#{pane_top} left=#{pane_left} active=#{?pane_active,1,0} cmd=#{pane_current_command} start_cmd='#{pane_start_command}' cwd='#{pane_current_path}' @label='#{@label}' title='#{pane_title}'"
+            # Per-pane @-namespace dump + initial env (CELL_*)
+            for pid in $(tmux list-panes -t "$wid" -F '#{pane_id}'); do
+              ppid=$(tmux display-message -p -t "$pid" '#{pane_pid}')
+              uopts=$(tmux show-options -p -t "$pid" 2>/dev/null | grep -E '^@' || true)
+              if [ -n "$uopts" ]; then
+                echo "  $pid @-options (DROPPED by snapshot.py):"
+                echo "$uopts" | sed 's/^/    /'
+              fi
+              # Initial env for the pane process — read CELL_ID and CELL_TITLE
+              # the same way snapshot.py does. Linux: /proc/<pid>/environ.
+              # macOS/BSD: `ps -E`. Both fail silently if unavailable.
+              cell_id=""
+              cell_title=""
+              if [ -r "/proc/$ppid/environ" ]; then
+                cell_id=$(tr '\0' '\n' < "/proc/$ppid/environ" 2>/dev/null | grep '^CELL_ID=' | head -1 | cut -d= -f2- || true)
+                cell_title=$(tr '\0' '\n' < "/proc/$ppid/environ" 2>/dev/null | grep '^CELL_TITLE=' | head -1 | cut -d= -f2- || true)
+              elif command -v ps >/dev/null 2>&1; then
+                envs=$(ps -E -ww -o command= -p "$ppid" 2>/dev/null || true)
+                cell_id=$(echo "$envs" | tr ' ' '\n' | grep '^CELL_ID=' | head -1 | cut -d= -f2- || true)
+                cell_title=$(echo "$envs" | tr ' ' '\n' | grep '^CELL_TITLE=' | head -1 | cut -d= -f2- || true)
+              fi
+              if [ -n "$cell_id" ] || [ -n "$cell_title" ]; then
+                echo "  $pid env: CELL_ID='$cell_id' CELL_TITLE='$cell_title'"
+              fi
+            done
+            echo
+          done
+        } > "$DEST/30-panes.txt"
+
+        # ─── 40-saved.yaml: the file snapshot.py last wrote ────────────────
+        YAML="$HOME/.config/tmuxp/${SESSION}.yaml"
+        if [ -f "$YAML" ]; then
+          cp "$YAML" "$DEST/40-saved.yaml"
+          # Quick presence-check on what tokens made it into the saved file.
+          # Reveals the coverage gap at a glance:
+          #   CELL_LABEL=0 → @label round-trip not implemented (current state)
+          #   @label=0     → confirms snapshot.py never emits @label in any form
+          {
+            echo "# Presence check (grep -c) in 40-saved.yaml"
+            echo "size=$(wc -c < "$DEST/40-saved.yaml" | tr -d ' ') bytes"
+            echo "mtime=$(date -r "$DEST/40-saved.yaml" '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || stat -c '%y' "$DEST/40-saved.yaml" 2>/dev/null)"
+            echo
+            for tok in CELL_ID CELL_TITLE CELL_LABEL @label label preset_layouts custom_layouts main-pane-height main-pane-width focus shell_command environment; do
+              count=$(grep -c "$tok" "$DEST/40-saved.yaml" 2>/dev/null || true)
+              echo "  $tok: ${count:-0}"
+            done
+          } > "$DEST/41-saved-summary.txt"
+        else
+          echo "(no saved YAML at $YAML — run save first)" > "$DEST/40-NO-SAVED-YAML.txt"
+        fi
+
+        # ─── 50-snapshot-emit.yaml: what snapshot.py WOULD emit now ────────
+        # In-process call to query_session + emit_yaml against the live state.
+        # Gives us the "if you saved right now" YAML without waiting for the
+        # user to press save. The diff between 40-saved.yaml and 50-snapshot-emit.yaml
+        # is what changed between the last save and now (e.g. labels added).
+        SNAP_PY="$ROOT/home/scripts/tmux/snapshot/snapshot.py"
+        if [ -f "$SNAP_PY" ] && command -v python3 >/dev/null 2>&1; then
+          DUMPS_DIR="$DEST" SNAP_PATH="$SNAP_PY" SESSION="$SESSION" \
+          OUT="$DEST/50-snapshot-emit.yaml" SNAP_PATH="$SNAP_PY" SESSION="$SESSION" \
+            python3 "$ROOT/home/scripts/tmux/snapshot/_debug_emit.py" \
+            > "$DEST/50-snapshot-emit.log" 2>&1 || true
+        else
+          echo "(snapshot.py or python3 not available)" > "$DEST/50-snapshot-emit.log"
+        fi
+
+        # ─── 60-snapshot-py.copy: pin the script version with the dump ─────
+        # Future-proofing: if the script changes, this dump still shows
+        # which version produced 50-snapshot-emit.yaml.
+        if [ -f "$SNAP_PY" ]; then
+          cp "$SNAP_PY" "$DEST/60-snapshot-py.copy"
+        fi
+
+        # ─── inventory ─────────────────────────────────────────────────────
+        ls -1 "$DEST"
+        printf '\n✓ debug dump at: %s\n' "$DEST"

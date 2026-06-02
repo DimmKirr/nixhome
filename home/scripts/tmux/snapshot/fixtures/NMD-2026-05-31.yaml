@@ -1,0 +1,24 @@
+session_name: NMD-2026-05-31
+preset_layouts:
+  nixhome: main-horizontal-mirrored
+windows:
+  - focus: 'true'
+    layout: 164b,222x53,0,0[222x2,0,51,110,222x50,0,0{111x50,0,0,111,110x50,112,0,112}]
+    options:
+      main-pane-height: '2'
+    panes:
+    - shell_command: /bin/sh
+      environment:
+        CELL_ID: '110'
+        CELL_LABEL: 'Three Renamed'
+    - focus: 'true'
+      shell_command: /bin/sh
+      environment:
+        CELL_ID: '111'
+        CELL_LABEL: 'One Renamed'
+    - shell_command: /bin/sh
+      environment:
+        CELL_ID: '112'
+        CELL_LABEL: 'Two Renamed'
+    start_directory: /tmp
+    window_name: nixhome

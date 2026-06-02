@@ -142,17 +142,31 @@
     };
   };
 
-  tmuxp-fzf = pkgs.tmuxPlugins.mkTmuxPlugin {
-    pluginName  = "tmuxp-fzf";
-    version     = "unstable-2024-03-01";
-    rtpFilePath = "main.tmux";
-    src = pkgs.fetchFromGitHub {
-      owner = "andersondanilo";
-      repo  = "tmuxp-fzf";
-      rev   = "821924e376139922691d73624f2da4dd9b2bf63d";
-      sha256 = "sha256-KDfQYX16IYpdJymsdzcS6yICJyny3dzpEYi2WrnnC10=";
-    };
-  };
+  # fzf-based session picker — replaces the upstream `andersondanilo/tmuxp-fzf`
+  # plugin which shelled out to raw `tmuxp load` and bypassed our post-load
+  # fixups (@label, pane_title, mirrored-preset re-apply, @layout-6..9).
+  # Same UX, same key (prefix + T), but routed through tmux-snapshot.
+  snapshotPicker = pkgs.writeShellScript "tmux-snapshot-picker" ''
+    set -eu
+    DIR="$HOME/.config/tmuxp"
+    if [ ! -d "$DIR" ]; then
+      tmux display-message "tmux-snapshot: no tmuxp dir at $DIR"
+      exit 0
+    fi
+    name=$(ls -1 "$DIR"/*.yaml 2>/dev/null \
+             | xargs -n1 basename \
+             | sed 's/\.yaml$//' \
+             | ${pkgs.fzf}/bin/fzf --prompt='session> ' --reverse --height=100%)
+    [ -n "$name" ] || exit 0
+    if tmux has-session -t "$name" 2>/dev/null; then
+      tmux switch-client -t "$name"
+    elif tmux-snapshot load "$name" >/dev/null 2>&1; then
+      tmux switch-client -t "$name" 2>/dev/null
+      tmux display-message "tmux-snapshot: loaded and switched to $name"
+    else
+      tmux display-message "tmux-snapshot: FAILED to load $name"
+    fi
+  '';
 in {
   enable = true;
 
@@ -451,12 +465,11 @@ in {
         set -g @now-playing-next-key ""
       '';
     }
-    {
-      plugin = tmuxp-fzf;
-      extraConfig = ''
-        set-environment -g TMUXP_FZF_LAUNCH_KEY 'T'
-      '';
-    }
+    # `tmuxp-fzf` plugin removed — its launcher called raw `tmuxp load`,
+    # bypassing tmux-snapshot's post-load restores (@label, pane_title,
+    # mirrored-preset re-apply, @layout-6..9). Replacement: prefix + T
+    # binding added below in the yank/tmux-snapshot block, routes through
+    # `snapshotPicker` (defined in the `let` block at the top of this file).
     # Dracula plugin entry removed — framework owns the status bar.
     better-mouse-mode
     sensible
@@ -488,6 +501,12 @@ in {
         # already-live sessions are skipped, never disturbed.
         bind C-r run-shell '${snapshotRestoreCurrent} "#S"'
         bind M-r run-shell '${snapshotRestore}'
+
+        # prefix + T : fzf picker over ~/.config/tmuxp/*.yaml. Switches to
+        # the session if it's already live, otherwise loads via
+        # tmux-snapshot (so @label/pane_title/preset re-apply/@layout-6..9
+        # all restore). Replaces the upstream tmuxp-fzf plugin.
+        bind T display-popup -E -w 60% -h 60% '${snapshotPicker}'
       '';
     }
 

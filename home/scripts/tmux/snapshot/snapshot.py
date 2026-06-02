@@ -49,6 +49,9 @@ class Pane:
     focus: bool
     cwd: str
     title: str = ""      # `select-pane -T` value, empty if untitled
+    label: str = ""      # `@label` pane option — set via `prefix > n` menu
+                         # ("Rename Pane"). Distinct from pane_title; rendered
+                         # alongside it in pane-border-format.
     persistent_cell_id: str = ""  # CELL_ID env var read from the pane process
 
     @property
@@ -206,6 +209,7 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
         "#{?pane_active,1,0}",
         "#{pane_current_path}",
         "#{pane_title}",
+        "#{@label}",
         "#{pane_pid}",
     ])
     raw = _tmux(socket, "list-panes", "-t", window_id, "-F", pane_fmt)
@@ -213,8 +217,8 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
     for line in raw.splitlines():
         if not line:
             continue
-        pid, pidx, top, left, w, h, cur, start, active, cwd, title, ppid = \
-            line.split(SEP, 11)
+        pid, pidx, top, left, w, h, cur, start, active, cwd, title, label, ppid = \
+            line.split(SEP, 12)
         panes.append(Pane(
             pane_id=pid,
             pane_index=int(pidx),
@@ -227,6 +231,7 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
             focus=(active == "1"),
             cwd=cwd,
             title=title,
+            label=label,
             persistent_cell_id=_read_pane_env(ppid, "CELL_ID"),
         ))
     # Sort by pane_index, NOT visual position.
@@ -666,6 +671,12 @@ def _emit_pane(lines: list[str], p: Pane) -> None:
         # shell), but the authoritative restore happens in load_session via
         # `select-pane -T` so the title is queryable without poking the shell.
         lines.append(f"        CELL_TITLE: {_yaml_quote(p.title)}")
+    if p.label:
+        # CELL_LABEL → @label pane option. Set via the "Rename Pane" menu
+        # (prefix > n) and rendered in pane-border-format. Same restore
+        # pattern as CELL_TITLE: travels via the env block for visibility
+        # but load_session re-applies it authoritatively via `set -p @label`.
+        lines.append(f"        CELL_LABEL: {_yaml_quote(p.label)}")
 
 
 # ------------------------------------------------------------------ commands
@@ -743,14 +754,24 @@ def load_session(yaml_path: Path, *,
             print(f"[WARN] re-apply {preset} on {window_name} ({wid}): "
                   f"{e.stderr or e}", file=sys.stderr)
 
-    # Restore pane titles. tmuxp persists CELL_TITLE as an env var, but
-    # `select-pane -T` is the authoritative source for `#{pane_title}`
-    # and survives layout changes without depending on the shell.
-    titles_by_window = _parse_pane_titles(text)
-    if titles_by_window:
+    # Restore pane titles (CELL_TITLE → `select-pane -T`) and pane labels
+    # (CELL_LABEL → `set -p @label`). tmuxp persists both as env vars on
+    # the spawned shell, but the env block alone doesn't restore the
+    # authoritative tmux-side state — `#{pane_title}` and `#{@label}` are
+    # what the status bar / pane-border render from, and they're not set
+    # from process env. We re-apply them here so the values survive layout
+    # changes without depending on the shell.
+    titles_by_window = _parse_pane_env(text, "CELL_TITLE")
+    labels_by_window = _parse_pane_env(text, "CELL_LABEL")
+    if titles_by_window or labels_by_window:
         if name_to_id is None:
             name_to_id = _list_window_ids(session_name, socket=socket, env=env)
-        for window_name, titles in titles_by_window.items():
+
+        # All window names referenced by either map. The list-panes
+        # query runs once per window and is shared between title/label
+        # restore to avoid double-shelling.
+        all_windows = set(titles_by_window) | set(labels_by_window)
+        for window_name in all_windows:
             wid = name_to_id.get(window_name)
             if wid is None:
                 continue
@@ -764,7 +785,7 @@ def load_session(yaml_path: Path, *,
                 res = subprocess.run(tmux_cmd, check=True, capture_output=True,
                                      text=True, env=env)
             except subprocess.CalledProcessError as e:
-                print(f"[WARN] list-panes for titles on {window_name}: "
+                print(f"[WARN] list-panes for title/label on {window_name}: "
                       f"{e.stderr or e}", file=sys.stderr)
                 continue
             idx_to_id = {}
@@ -773,7 +794,9 @@ def load_session(yaml_path: Path, *,
                     continue
                 idx, pid = line.split()
                 idx_to_id[int(idx)] = pid
-            for pane_index, title in titles.items():
+
+            # Restore titles: `select-pane -t <pid> -T <title>`
+            for pane_index, title in titles_by_window.get(window_name, {}).items():
                 pid = idx_to_id.get(pane_index)
                 if pid is None or not title:
                     continue
@@ -786,6 +809,24 @@ def load_session(yaml_path: Path, *,
                                    text=True, env=env)
                 except subprocess.CalledProcessError as e:
                     print(f"[WARN] restore title on {pid}: {e.stderr or e}",
+                          file=sys.stderr)
+
+            # Restore labels: `set -p -t <pid> @label <value>`
+            # Same shape as the title-rename binding in tmux.nix (Rename
+            # Pane menu): pane-scoped @-namespace option.
+            for pane_index, label in labels_by_window.get(window_name, {}).items():
+                pid = idx_to_id.get(pane_index)
+                if pid is None or not label:
+                    continue
+                try:
+                    tmux_cmd = ["tmux"]
+                    if socket:
+                        tmux_cmd += ["-S", socket]
+                    tmux_cmd += ["set-option", "-p", "-t", pid, "@label", label]
+                    subprocess.run(tmux_cmd, check=True, capture_output=True,
+                                   text=True, env=env)
+                except subprocess.CalledProcessError as e:
+                    print(f"[WARN] restore @label on {pid}: {e.stderr or e}",
                           file=sys.stderr)
 
 
@@ -826,30 +867,35 @@ def _parse_custom_layouts(yaml_text: str) -> dict[str, str]:
     return _parse_top_level_map(yaml_text, "custom_layouts")
 
 
-def _parse_pane_titles(yaml_text: str) -> dict[str, dict[int, str]]:
-    """Walk the YAML and extract {window_name: {pane_index: title}}.
+def _parse_pane_env(yaml_text: str, var_name: str) -> dict[str, dict[int, str]]:
+    """Walk the YAML and extract {window_name: {pane_index: env_value}}.
+
+    `var_name` is the key under each pane's `environment:` block — currently
+    CELL_TITLE (restored via `select-pane -T`) and CELL_LABEL (restored via
+    `set -p @label`). Both follow the same emit shape.
 
     Stays purely textual (no PyYAML dep). emit_yaml writes each window
     as a list item starting with `  - <first-key>: ...` at 2-space
     indent; `window_name:` appears LAST inside that block (after
-    `panes:`). So we buffer titles per-window and commit on the next
+    `panes:`). So we buffer values per-window and commit on the next
     window boundary (a new `  - ` line) using the window_name we'll
     discover later in that same block.
     """
     out: dict[str, dict[int, str]] = {}
-    buf_titles: dict[int, str] = {}
+    buf_values: dict[int, str] = {}
     buf_window_name: str | None = None
     pane_index = -1
-    pending_title: str | None = None
+    pending_value: str | None = None
     in_panes_block = False
+    pattern = re.compile(rf"^ {{8}}{re.escape(var_name)}:\s*(.+?)\s*$")
 
     def flush():
-        nonlocal buf_titles, buf_window_name
-        if pending_title is not None and pane_index >= 0:
-            buf_titles[pane_index] = pending_title
-        if buf_window_name and buf_titles:
-            out[buf_window_name] = buf_titles
-        buf_titles = {}
+        nonlocal buf_values, buf_window_name
+        if pending_value is not None and pane_index >= 0:
+            buf_values[pane_index] = pending_value
+        if buf_window_name and buf_values:
+            out[buf_window_name] = buf_values
+        buf_values = {}
         buf_window_name = None
 
     for line in yaml_text.splitlines():
@@ -857,7 +903,7 @@ def _parse_pane_titles(yaml_text: str) -> dict[str, dict[int, str]]:
         if line.startswith("  - "):
             flush()
             pane_index = -1
-            pending_title = None
+            pending_value = None
             in_panes_block = False
             # Fall through — first key on this line might be `panes:` etc.
         stripped = line.strip()
@@ -869,20 +915,20 @@ def _parse_pane_titles(yaml_text: str) -> dict[str, dict[int, str]]:
             pane_index = -1
             continue
         if in_panes_block and line.startswith("    - "):
-            if pending_title is not None and pane_index >= 0:
-                buf_titles[pane_index] = pending_title
+            if pending_value is not None and pane_index >= 0:
+                buf_values[pane_index] = pending_value
             pane_index += 1
-            pending_title = None
+            pending_value = None
             continue
         if in_panes_block:
-            m = re.match(r"^ {8}CELL_TITLE:\s*(.+?)\s*$", line)
+            m = pattern.match(line)
             if m:
                 val = m.group(1)
                 if val.startswith("'") and val.endswith("'") and len(val) >= 2:
                     val = val[1:-1].replace("''", "'")
                 elif val.startswith('"') and val.endswith('"') and len(val) >= 2:
                     val = val[1:-1]
-                pending_title = val
+                pending_value = val
                 continue
         # Any line at indent < 4 inside the window block (but not `  - `)
         # that isn't `window_name:` or `panes:` may signal we're past

@@ -95,7 +95,7 @@
   masApps = {
     # "Slack" = 803453959; # pinned — mas 6.x removed 'get' command, install manually via App Store
     "Telegram" = 747648890;
-    # "Yubikey Authenticator" = 1497506650; # pinned at 7.3.0 — mas tries to upgrade to 7.3.2 which isn't available yet # TODO: review if pin is still required
+    "Yubico Authenticator" = 1497506650;
 #    "1Password Safari" = 1569813296; # Pinned
     # Re-enabled after mas overlay (nixpkgs-unstable.mas 7.x) added in
     # hosts/automationd/default.nix. Tracking: nix-darwin#1722, mas-cli#1221.
@@ -103,6 +103,10 @@
     "DigiDoc4 Client" = 1370791134;
     "Safari WebID" = 1576665083;
     "Final Cut Pro" = 424389933;
+    "Numbers" = 361304891;
+    "Pages" = 361309726;
+    "Windows App" = 1295203466; # Microsoft RDP client (rebranded from "Microsoft Remote Desktop")
+    "Xcode" = 497799835;
     # "Tailscale" = 1475387142; # commented due to failed update/upgrade. Next time try nixpkgs darwin version again
   };
 }

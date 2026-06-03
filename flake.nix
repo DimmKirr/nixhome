@@ -70,6 +70,11 @@
             home-manager.nixosModules.home-manager
             {
               home-manager = {
+                # Use the system's nixpkgs (with allowUnfree from
+                # hosts/jump/default.nix) instead of a separate HM instance —
+                # otherwise unfree home packages like obsidian get rejected.
+                # Mirrors the darwin config below.
+                useGlobalPkgs = true;
                 # Include the home-manager module
                 users.dmitry = import ./home/dmitry/default.nix;
                 extraSpecialArgs = {

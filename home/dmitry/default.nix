@@ -77,6 +77,7 @@
     mise = import ../programs/mise.nix {inherit pkgs pkgsEdge;};
     ssh = import ../programs/ssh.nix {inherit pkgs;};
     k9s = import ../programs/k9s.nix {inherit pkgsUnstable;};
+    zellij = import ../programs/zellij.nix {};
 
     zsh = import ../programs/zsh.nix {inherit pkgs pkgsUnstable;};
     mc = import ../programs/mc.nix {inherit pkgs;};

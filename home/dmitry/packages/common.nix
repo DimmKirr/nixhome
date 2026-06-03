@@ -35,6 +35,7 @@ let
     git-filter-repo
     git-lfs
     git-secrets
+    lazygit
     # mc is managed via programs.mc in home/programs/mc.nix
     python2
 

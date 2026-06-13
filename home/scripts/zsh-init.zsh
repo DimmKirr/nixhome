@@ -10,28 +10,40 @@ export NIX_BUILD_SHELL=$SHELL
 export TF_CLI_CONFIG_FILE=${HOME}/.terraformrc
 
 
-# Separate history per each tmux session
+# Separate history (and JIRA config) per multiplexer session.
+# Works under tmux ($TMUX) or zellij ($ZELLIJ_SESSION_NAME); whichever is
+# active provides the session name we key HISTFILE on, so command recall is
+# scoped to the project. Same-named sessions share a file (e.g. tmux "NMD"
+# and zellij "NMD" both use ~/.zsh_history_NMD). Falls back to global
+# history outside both multiplexers.
+local session_name=""
 if [[ -n "$TMUX" ]]; then
+  # Keep TMUX_SESSION_NAME exported — several helpers below depend on it.
   export TMUX_SESSION_NAME=$(tmux display-message -p '#S')
+  session_name="$TMUX_SESSION_NAME"
+elif [[ -n "$ZELLIJ_SESSION_NAME" ]]; then
+  session_name="$ZELLIJ_SESSION_NAME"
+fi
 
+if [[ -n "$session_name" ]]; then
   # History per session (project)
-  export HISTFILE="$HOME/.zsh_history_$TMUX_SESSION_NAME"
+  export HISTFILE="$HOME/.zsh_history_$session_name"
 
-  # Construct the dynamic variable name based on the value of TMUX
-  dynamic_jira_token_var="JIRA_API_TOKEN_$TMUX_SESSION_NAME"
+  # Construct the dynamic variable name based on the session name
+  dynamic_jira_token_var="JIRA_API_TOKEN_$session_name"
 
   # Check if this dynamically named variable is set and not empty
   # using Zsh's parameter indirection
   if [[ -n "${(P)dynamic_jira_token_var}" ]]; then
     # If it is set, you can access its value also using parameter indirection
     local token_value="${(P)dynamic_jira_token_var}"
-    echo "JIRA token for TMUX_SESSION_NAME session '$TMUX_SESSION_NAME' ($dynamic_jira_token_var) is set to: $token_value"
+    echo "JIRA token for session '$session_name' ($dynamic_jira_token_var) is set to: $token_value"
     # You can now use $token_value
     export JIRA_API_TOKEN="$token_value"
   fi
 
   # Set JIRA_CONFIG (will be used in jira() function)
-  export JIRA_CONFIG="$HOME/.config/.jira/.config-$TMUX_SESSION_NAME.yml"
+  export JIRA_CONFIG="$HOME/.config/.jira/.config-$session_name.yml"
 
 else
   export HISTFILE="$HOME/.zsh_history"

@@ -203,6 +203,12 @@ in {
         bind -n C-, previous-window
         bind -n C-. next-window
 
+        # Session cycling (Alt+Tab / Shift+Alt+Tab) — no prefix needed.
+        # Ghostty sends raw Alt+Tab (ESC+Tab); both tmux and zellij
+        # bind it independently so the same Ghostty config works for either.
+        bind -n M-Tab switch-client -n
+        bind -n M-BTab switch-client -p
+
         # Move window left/right and follow it (Ctrl+Shift+Arrow)
         bind-key -n C-S-Left swap-window -t -1\; select-window -t -1
         bind-key -n C-S-Right swap-window -t +1\; select-window -t +1

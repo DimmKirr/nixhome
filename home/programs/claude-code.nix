@@ -4,6 +4,7 @@ let
   jsonFormat = pkgs.formats.json {};
 
   claudeConfig = {
+    model = "claude-opus-4-6[1m]";
     preferredNotifChannel = "terminal_bell";
     permissions = {
       allow = [

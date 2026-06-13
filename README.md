@@ -33,7 +33,7 @@ home-manager switch --flake .#devbox
 
 | Channel            | Examples                                                                                          |
 |--------------------|---------------------------------------------------------------------------------------------------|
-| **stable** (25.11) | kubectl, helm, git, go, awscli2, terraform-docs, ffmpeg, tmux, vscode, gh, postgresql             |
+| **stable** (26.05) | kubectl, helm, git, go, awscli2, terraform-docs, ffmpeg, tmux, vscode, gh, postgresql             |
 | **unstable**       | k9s, jetbrains-toolbox, goreleaser, claude-code, google-cloud-sdk, wireguard-tools, postman, hugo |
 | **edge** (master)  | *(reserved; seclists moved to darwin-only)*                                                       |
 
@@ -110,7 +110,7 @@ xclip, wl-clipboard, xdg-utils, rofi, ddcutil, alsa-utils, pciutils, usbutils
 
 | Variable       | Channel                | Used for             |
 |----------------|------------------------|----------------------|
-| `pkgs`         | `nixpkgs-25.11-darwin` | Default, stable      |
+| `pkgs`         | `nixpkgs-26.05-darwin` | Default, stable      |
 | `pkgsUnstable` | `nixpkgs-unstable`     | Newer packages       |
 | `pkgsEdge`     | `nixpkgs master`       | Latest/bleeding edge |
 
@@ -118,8 +118,8 @@ xclip, wl-clipboard, xdg-utils, rofi, ddcutil, alsa-utils, pciutils, usbutils
 
 | Input        | Source                                            |
 |--------------|---------------------------------------------------|
-| nix-darwin   | `github:LnL7/nix-darwin/nix-darwin-25.11`         |
-| home-manager | `github:nix-community/home-manager/release-25.11` |
-| nixvim       | `github:nix-community/nixvim/nixos-25.11`         |
+| nix-darwin   | `github:LnL7/nix-darwin/nix-darwin-26.05`         |
+| home-manager | `github:nix-community/home-manager/release-26.05` |
+| nixvim       | `github:nix-community/nixvim/nixos-26.05`         |
 | asdf         | local path `/Users/dmitry/dev/dimmkirr/nix-asdf`  |
 | claude-code  | `github:roman/claude-code.nix`                    |

@@ -21,7 +21,7 @@ let
     gnutar
     tmux
     direnv
-    nixfmt-rfc-style
+    nixfmt
     treefmt
     awscli2
     dive
@@ -53,9 +53,11 @@ let
     cantarell-fonts
     source-code-pro
     gentium
+    paratype-pt-sans
+    literata
+    google-fonts
 
     inetutils
-    nixfmt-rfc-style
 
     # Java
     openjdk
@@ -82,6 +84,7 @@ let
     qrencode
 
     pandoc
+    tectonic
 
     powershell
 

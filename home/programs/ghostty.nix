@@ -28,8 +28,11 @@
       keybind = cmd+k=unbind
       keybind = cmd+w=unbind
       keybind = cmd+d=unbind
-      keybind = opt+tab=unbind
-      keybind = shift+opt+tab=unbind
+      # opt+tab / shift+opt+tab: NOT unbound — passed through natively
+      # to the terminal app. With macos-option-as-alt=left, Ghostty sends
+      # Alt+Tab via the Kitty keyboard protocol (if the app supports it)
+      # or as ESC+Tab (legacy). Both tmux (bind -n M-Tab) and zellij
+      # (bind "Alt Tab") handle it independently.
       keybind = f6=unbind
 
 
@@ -61,8 +64,8 @@
       keybind = cmd+a=text:\x02\x70
       keybind = cmd+s=text:\x02\x6E
 
-      keybind = shift+opt+tab=text:\x02(
-      keybind = opt+tab=text:\x02)
+      # Session cycling: opt+tab / shift+opt+tab pass through natively
+      # (no keybind override needed — see unbind section above)
 
       # Open Existing Windows
       keybind = cmd+k=text:\x02\x77/

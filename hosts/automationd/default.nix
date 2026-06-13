@@ -34,6 +34,17 @@ in {
       }).mas;
     })
 
+    # pipx overlay — nixpkgs 26.05 ships pipx 1.8.0 whose test suite breaks
+    # against the newer `packaging` lib: PEP 508 spec parsing now normalizes
+    # `name@ url` to `name @ url`, so 7 test_package_specifier.py assertions
+    # fail in checkPhase. The package itself is fine; skip the build-time tests.
+    (_final: prev: {
+      pipx = prev.pipx.overridePythonAttrs (_old: {
+        doCheck = false;
+        doInstallCheck = false;
+      });
+    })
+
     #    # karabiner
     #    (self: super: {
     #      karabiner-elements = super.karabiner-elements.overrideAttrs (old: {

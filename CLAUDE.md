@@ -291,7 +291,7 @@ This is a Nix-based system configuration for macOS using:
    - nixvim: Neovim configuration as code
    - asdf: Version manager integration from local path
    - claude-code: Claude Code integration
-   - Multiple nixpkgs channels: stable (25.05), unstable, and edge
+   - Multiple nixpkgs channels: stable (26.05), unstable, and edge
 
 5. **User Configuration**:
    - Primary user: dmitry
@@ -342,11 +342,11 @@ This is a Nix-based system configuration for macOS using:
 The `flake.nix` defines:
 
 1. **Inputs** (Dependencies):
-   - `nixpkgs` (25.05-darwin): Main package source
+   - `nixpkgs` (26.05-darwin): Main package source
    - `nixpkgs-unstable`: Bleeding-edge packages
    - `nixpkgs-edge` (master): Very latest packages
-   - `nix-darwin` (25.05): macOS system configuration framework
-   - `home-manager` (25.05): User environment configuration
+   - `nix-darwin` (26.05): macOS system configuration framework
+   - `home-manager` (26.05): User environment configuration
    - `nixvim`: Neovim as code configuration
    - `asdf`: Local path integration for version manager
    - `claude-code`: Claude Code integration
@@ -444,7 +444,7 @@ Most of the configuration is actually cross-platform compatible:
 
 The configuration uses three nixpkgs channels:
 
-1. **Stable (25.05-darwin)**: Default, most packages
+1. **Stable (26.05-darwin)**: Default, most packages
 2. **Unstable**: Newer packages (jetbrains-toolbox, k9s, etc.)
 3. **Edge (master)**: Very latest (seclists, etc.)
 

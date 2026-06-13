@@ -4,7 +4,8 @@
   enable = true;
   onActivation = {
     cleanup = "uninstall";
-    autoUpdate = true;
+    extraFlags = [ "--force" ]; # Homebrew 5.1.14+ requires --force with --cleanup (PR #22395)
+    autoUpdate = false; # was true — disabled to prevent Homebrew self-updating past breaking changes (5.1.14 broke --cleanup)
     upgrade = true;
   };
 
@@ -90,6 +91,7 @@
     "tiger-vnc" # broken on darwin in nixpkgs, using homebrew instead
     "qemu" # qemu-img and tools; nix qemu conflicts with androidsdk's bundled qemu-img
     "porter-dev/porter/porter" # porter.run CLI — not in nixpkgs
+    "mas"
   ];
 
   masApps = {
@@ -107,6 +109,6 @@
     "Pages" = 361309726;
     "Windows App" = 1295203466; # Microsoft RDP client (rebranded from "Microsoft Remote Desktop")
     "Xcode" = 497799835;
-    # "Tailscale" = 1475387142; # commented due to failed update/upgrade. Next time try nixpkgs darwin version again
+    "Tailscale" = 1475387142;
   };
 }

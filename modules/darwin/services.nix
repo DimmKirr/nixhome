@@ -1,6 +1,7 @@
 { pkgsEdge, ... }: {
   imports = [
     ./services/ollama.nix
+    ./services/chatterbox.nix
   ];
 
   services = {
@@ -17,6 +18,11 @@
         OLLAMA_NUM_PARALLEL = "4";           # concurrent requests (48GB has headroom)
         OLLAMA_MAX_LOADED_MODELS = "2";      # keep 2 models loaded simultaneously
       };
+    };
+
+    chatterbox = {
+      enable = true;
+      model = "chatterbox-turbo";
     };
 
     # tailscale.enable = true;

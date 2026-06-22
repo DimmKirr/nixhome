@@ -266,11 +266,14 @@ in {
       ShowStatusBar = false;
     };
 
-    # Tab between form controls and function keys config
+    # Keyboard and input config
     NSGlobalDomain = {
-      AppleKeyboardUIMode = 3;
+      AppleKeyboardUIMode = 2; # Full keyboard access (tab through all controls). Was 3, but Sequoia+ only accepts 0 or 2 (nix-darwin#1378)
       "com.apple.keyboard.fnState" = true; # Fn key is function by default system-wise, but overriden by karabiner based on the app
+      ApplePressAndHoldEnabled = true; # Long-press shows accent popup instead of key repeat
+      "com.apple.swipescrolldirection" = false; # Traditional (non-natural) scroll direction
     };
+
   };
 
   # Use TouchID for sudo authentication
@@ -298,6 +301,21 @@ in {
     chime = false; # Disable startup chime
   };
 
+  # Keyboard: Globe key switches input source; Ctrl+Space and Ctrl+Option+Space do not
+  system.activationScripts.postActivation.text = ''
+    # Globe key = Change Input Source (0=Nothing, 1=Input Source, 2=Emoji, 3=Dictation)
+    # ByHost domain required — regular `defaults write` hits the wrong plist on Sequoia+
+    sudo -u dmitry defaults write com.apple.HIToolbox AppleFnUsageType -int 1
+    sudo -u dmitry defaults -currentHost write com.apple.HIToolbox AppleFnUsageType -int 1
+    # Disable Ctrl+Space (hotkey 60) and Ctrl+Option+Space (hotkey 61) for input switching
+    sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 \
+      '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>262144</integer></array></dict></dict>'
+    sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 61 \
+      '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>786432</integer></array></dict></dict>'
+    # Flush cfprefsd cache so defaults take effect immediately (nix-darwin#1572)
+    killall cfprefsd 2>/dev/null || true
+    /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
+  '';
 
   system.primaryUser = "dmitry";
 }

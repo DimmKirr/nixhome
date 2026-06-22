@@ -121,6 +121,7 @@ let
     automake
     libtool
     postgresql
+    mariadb.client
     gdbm
 
     # Build dependencies

@@ -171,7 +171,7 @@ in {
   enable = true;
 
   #    shortcut = "q";
-  #    escapeTime = 10;
+  escapeTime = 10;
   keyMode = "vi";
 
   terminal = "tmux-256color";

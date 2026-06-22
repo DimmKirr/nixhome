@@ -117,8 +117,8 @@
       display_codepage = "UTF-8";
       source_codepage = "Other_8_bit";
       autodetect_codeset = "";
-      clipboard_store = "";
-      clipboard_paste = "";
+      clipboard_store = "pbcopy";
+      clipboard_paste = "pbpaste";
     };
 
     # Colors: keep section with empty values so mc doesn't override with defaults

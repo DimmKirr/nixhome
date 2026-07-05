@@ -14,6 +14,9 @@ with pkgs; [
   # xquartz  # Using homebrew cask instead - nix build fails on 25.11
   # karabiner-elements  # Using homebrew - nix can't register app bundles with macOS properly
 
+  colima
+  docker-client
+
   keepassxc
   discord      # x86_64 only, doesn't work on aarch64-linux
   seclists     # Large wordlist package - only on darwin, too big for devbox

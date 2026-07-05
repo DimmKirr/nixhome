@@ -101,8 +101,6 @@
   imports = [
     ../programs/ghostty.nix
     ../programs/ize.nix
-    ../programs/cell.nix
-    ../programs/atun.nix
     ../programs/karabiner.nix
     ../programs/finicky.nix
     ../programs/claude-code.nix

@@ -53,6 +53,24 @@ fi
 fpath+=($HOME/.local/share/zsh/site-functions)
 fpath+=($HOME/.rbenv/completions)
 
+# Dynamic completions — each binary generates its own zsh completions at shell
+# startup, so we always match the installed version (no stale static scripts).
+# sed strips any ANSI-decorated banner lines some Cobra CLIs print before the
+# actual #compdef script (causes "bad pattern" errors in eval).
+# Cobra's `completion zsh` emits `compdef _foo foo` at line 2, before the
+# _foo() function body. Via fpath that's fine (lazy autoload), but eval runs
+# it immediately → "function definition file not found". Strip it + any ANSI
+# welcome banner, eval the body, then register compdef once _foo exists.
+_dynamic_completion() {
+  local out
+  out="$("$1" ${@:2} 2>/dev/null)" || return
+  out="$(printf '%s\n' "$out" | sed -n '/^#compdef/,$p' | sed '/^compdef /d')"
+  eval "$out"
+  compdef "_$1" "$1"
+}
+(( $+commands[cell] )) && _dynamic_completion cell completion zsh
+(( $+commands[atun] )) && _dynamic_completion atun completion zsh
+
 
 
 # Login to 11password

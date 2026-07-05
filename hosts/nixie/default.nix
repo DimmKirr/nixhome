@@ -5,7 +5,10 @@
   pkgsUnstable,
   ...
 }: {
+<<<<<<< Updated upstream
   # Allow unfree system packages
+=======
+>>>>>>> Stashed changes
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
 
@@ -14,6 +17,7 @@
   boot.loader.efi.canTouchEfiVariables = true;
 
   # Networking
+<<<<<<< Updated upstream
   networking.hostName = "jump";
   networking.networkmanager.enable = true;
 
@@ -21,6 +25,17 @@
   time.timeZone = "UTC";
 
   # Select internationalisation properties
+=======
+  networking.hostName = "nixie";
+  networking.networkmanager.enable = true;
+  networking.firewall.enable = true;
+  networking.firewall.allowedTCPPorts = [ 22 ];
+
+  # Timezone
+  time.timeZone = "UTC";
+
+  # Locale
+>>>>>>> Stashed changes
   i18n.defaultLocale = "en_US.UTF-8";
   i18n.extraLocaleSettings = {
     LC_ADDRESS = "en_US.UTF-8";
@@ -34,12 +49,24 @@
     LC_TIME = "en_US.UTF-8";
   };
 
+<<<<<<< Updated upstream
   # Define a user account
+=======
+  # User account
+>>>>>>> Stashed changes
   users.users.dmitry = {
     isNormalUser = true;
     description = "Dmitry Kireev";
     extraGroups = ["networkmanager" "wheel" "docker"];
     shell = pkgs.zsh;
+<<<<<<< Updated upstream
+=======
+    openssh.authorizedKeys.keys = [
+      "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAqHIzvxRZ+bixPYtLSoiMYu49l+a3T1Ejxn2xGW2bvuAAAACnNzaDpkbWl0cnk= dmitry@kirr.io"
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDDvjdNAdToapXBfMfhW688y2YsijBCbvBFrV0pqmOV5u/AaCK8MOFJcGnqkMui7ihmAQbf0DZ794hfdTVRMAccR9zR1YwIOB1SH/DPBrnCtHk8Y1I3iVvLaVCrQFRJyzcVMTOwG6mKJJTzQuuzvKteuxeublJuDGY4uAeaztfXVE5AJurVN2Xwc1sw/0RR6gXAKe0uGn92X9s0kdB/nbV9bJP4RTdIEHbm3TaVghYevrXU/amsT112wp4eYQEIUSWpegYRIv5cRaBzyLsvDrC9yNJdzIV9Zy6jUbUoFGWmuisgTPwfkaa2/mAhyulUizdT6Oj6f8leRpW6iVTr+CCi5s4TUx6DKjeP5SI/DDI2RZEUiF7xW89Sqf0dVw9tdSdzdI1TU7m5NW3aIC1/sFJ0JF06fqJFZ5/PKb4LhWvdI+mhwFkWVQsVYUKZiOpH1iwEa3eevb1eZZEYThaMA0zt0hT0vloF7rEZN28/CaB4fUzks8PHn5Zc3Srdvzfux5E="
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAgqQTngjpLZYFBBBu2z7N5s7+LCUjWZCfqkx5UrblKT"
+    ];
+>>>>>>> Stashed changes
   };
 
   # System packages
@@ -49,6 +76,7 @@
     git
     curl
     htop
+<<<<<<< Updated upstream
   ];
 
   # Enable programs
@@ -56,6 +84,27 @@
   programs.gnupg.agent.enable = true;
 
   # Enable services
+=======
+    tree
+    unzip
+    ripgrep
+    fd
+    jq
+    tmux
+    lsof
+    iotop
+    nmap
+    dig
+    traceroute
+  ];
+
+  # Programs
+  programs.zsh.enable = true;
+  programs.gnupg.agent.enable = true;
+  programs.mtr.enable = true;
+
+  # SSH
+>>>>>>> Stashed changes
   services.openssh = {
     enable = true;
     settings = {
@@ -65,7 +114,11 @@
     };
   };
 
+<<<<<<< Updated upstream
   # Enable Docker
+=======
+  # Docker
+>>>>>>> Stashed changes
   virtualisation.docker.enable = true;
 
   # Nix settings
@@ -89,9 +142,13 @@
     };
   };
 
+<<<<<<< Updated upstream
   # This value determines the NixOS release from which the default
   # settings for stateful data, like file locations and database versions
   # on your system were taken. It's perfectly fine and recommended to leave
   # this value at the release version of the first install of this system.
   system.stateVersion = "24.11";
+=======
+  system.stateVersion = "25.05";
+>>>>>>> Stashed changes
 }

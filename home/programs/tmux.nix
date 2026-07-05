@@ -187,6 +187,15 @@ in {
         # Enable mouse support
         set -g mouse on
 
+        # Allow escape sequences (Kitty graphics protocol) to pass through
+        # to the outer terminal — required for Ghostty image display.
+        set -g allow-passthrough on
+
+        # Propagate outer-terminal identity into tmux sessions so apps
+        # (kitten icat, viu, chafa, etc.) detect kitty graphics support
+        # even though $TERM is tmux-256color.
+        set -ga update-environment "TERM_PROGRAM TERM_PROGRAM_VERSION COLORTERM"
+
         # Window and Pane index starts with 1
         set -g base-index 1
         set -g pane-base-index 1

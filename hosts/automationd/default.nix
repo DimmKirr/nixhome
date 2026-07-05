@@ -271,7 +271,8 @@ in {
       AppleKeyboardUIMode = 2; # Full keyboard access (tab through all controls). Was 3, but Sequoia+ only accepts 0 or 2 (nix-darwin#1378)
       "com.apple.keyboard.fnState" = true; # Fn key is function by default system-wise, but overriden by karabiner based on the app
       ApplePressAndHoldEnabled = true; # Long-press shows accent popup instead of key repeat
-      "com.apple.swipescrolldirection" = false; # Traditional (non-natural) scroll direction
+      # swipescrolldirection moved to postActivation — nix-darwin's userDefaults
+      # step writes it too early and activateSettings -u flushes it (nix-darwin#1721)
     };
 
   };
@@ -301,20 +302,48 @@ in {
     chime = false; # Disable startup chime
   };
 
-  # Keyboard: Globe key switches input source; Ctrl+Space and Ctrl+Option+Space do not
+  # Workaround for nix-darwin#1721: nix-darwin's userDefaults step (13/24)
+  # writes NSGlobalDomain, but without an activateSettings flush those
+  # writes only take effect at next login. We write our overrides in
+  # postActivation (24/24) so they're the final word, then flush once.
+  #
+  # Order matters: all `defaults write` FIRST, then one cfprefsd restart
+  # + activateSettings at the end. The old code killed cfprefsd before
+  # activateSettings, which raced (activateSettings needs cfprefsd alive).
   system.activationScripts.postActivation.text = ''
+    # --- Write overrides (plist DB writes, no daemon interaction) ---
+
+    # Traditional (non-natural) scroll direction — both domains so it sticks
+    sudo -u dmitry defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
+    sudo -u dmitry defaults -currentHost write NSGlobalDomain com.apple.swipescrolldirection -bool false
+
     # Globe key = Change Input Source (0=Nothing, 1=Input Source, 2=Emoji, 3=Dictation)
-    # ByHost domain required — regular `defaults write` hits the wrong plist on Sequoia+
     sudo -u dmitry defaults write com.apple.HIToolbox AppleFnUsageType -int 1
     sudo -u dmitry defaults -currentHost write com.apple.HIToolbox AppleFnUsageType -int 1
+
     # Disable Ctrl+Space (hotkey 60) and Ctrl+Option+Space (hotkey 61) for input switching
     sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60 \
       '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>262144</integer></array></dict></dict>'
     sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 61 \
       '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>786432</integer></array></dict></dict>'
-    # Flush cfprefsd cache so defaults take effect immediately (nix-darwin#1572)
-    killall cfprefsd 2>/dev/null || true
-    /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
+
+    # Disable Spotlight search Cmd+Space (hotkey 64) and Finder search Cmd+Option+Space (hotkey 65)
+    # so Raycast owns Cmd+Space exclusively
+    sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 \
+      '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1048576</integer></array></dict></dict>'
+    sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 65 \
+      '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1572864</integer></array></dict></dict>'
+
+    # TODO: Disable double-tap Cmd → Type to Siri. No known defaults write
+    # key exists for the Sequoia Apple Intelligence shortcut. The legacy
+    # com.apple.Siri KeyboardShortcutPreSAE does NOT control it.
+    # Set manually: System Settings → Apple Intelligence & Siri → Keyboard
+    # Shortcut → Globe+S (or Off). Use plistwatch to discover the real key.
+
+    # --- Flush: restart cfprefsd so it re-reads plists, then activate ---
+    sudo -u dmitry killall cfprefsd 2>/dev/null || true
+    sleep 1
+    sudo -u dmitry /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
   '';
 
   system.primaryUser = "dmitry";

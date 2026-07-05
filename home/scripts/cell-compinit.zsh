@@ -18,7 +18,7 @@ _cell()
     local shellCompDirectiveNoFileComp=4
     local shellCompDirectiveFilterFileExt=8
     local shellCompDirectiveFilterDirs=16
-    local shellCompDirectiveKeepOrder=32
+    local she llCompDirectiveKeepOrder=32
 
     local lastParam lastChar flagPrefix requestComp out directive comp lastComp noSpace keepOrder
     local -a completions

@@ -92,6 +92,7 @@
     "qemu" # qemu-img and tools; nix qemu conflicts with androidsdk's bundled qemu-img
     "porter-dev/porter/porter" # porter.run CLI — not in nixpkgs
     "mas"
+    "libimobiledevice"
   ];
 
   masApps = {

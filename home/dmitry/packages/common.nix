@@ -96,6 +96,9 @@ let
 
     terraform-docs
 
+    gdu
+    dua
+    dust
     yamllint
     yq-go
     nmap
@@ -136,6 +139,7 @@ let
     pipx
     shfmt
     ffmpeg
+    mpv
     tmuxp
     aws-vault
     graphviz

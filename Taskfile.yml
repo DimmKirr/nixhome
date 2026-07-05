@@ -14,6 +14,12 @@ vars:
   TMUXP_DUMP_ROOT: '{{.ROOT_DIR}}/.context/tmuxp-debug'
 
 tasks:
+  switch:
+    aliases: [apply]
+    desc: Build and activate the nix-darwin configuration
+    cmds:
+      - sudo darwin-rebuild switch --flake .
+
   debug:theme:
     desc: Dump full tmux theme/status state (run from inside tmux)
     cmds:

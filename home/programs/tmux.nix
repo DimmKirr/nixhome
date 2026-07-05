@@ -170,7 +170,7 @@
 in {
   enable = true;
 
-  #    shortcut = "q";
+  shortcut = if pkgs.stdenv.isLinux then "a" else "b";
   escapeTime = 10;
   keyMode = "vi";
 

@@ -125,6 +125,26 @@
         "type": "github"
       }
     },
+    "devcell": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783255472,
+        "narHash": "sha256-Hbf5hVsOimoq0Zg2EtdSlz2EXa7NdwT5BP2Ib/6Qh+w=",
+        "owner": "devcell-sh",
+        "repo": "devcell",
+        "rev": "ef2ad16ad85a86abd396bd9a7acdffa1e332b1b1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "devcell-sh",
+        "repo": "devcell",
+        "type": "github"
+      }
+    },
     "devenv": {
       "inputs": {
         "cachix": "cachix",
@@ -1047,6 +1067,7 @@
       "inputs": {
         "claude-code": "claude-code",
         "comfyui": "comfyui",
+        "devcell": "devcell",
         "home-manager": "home-manager_2",
         "nix-darwin": "nix-darwin",
         "nixpkgs": "nixpkgs_5",

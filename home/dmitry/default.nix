@@ -49,7 +49,8 @@
     packages =
       (import ./packages/common.nix { inherit pkgs pkgsUnstable pkgsEdge; })
       ++ (lib.optionals pkgs.stdenv.isDarwin (import ./packages/darwin.nix { inherit pkgs pkgsUnstable; }))
-      ++ (lib.optionals pkgs.stdenv.isLinux (import ./packages/linux.nix { inherit pkgs; }));
+      ++ (lib.optionals pkgs.stdenv.isLinux (import ./packages/linux.nix { inherit pkgs; }))
+      ++ [ inputs.devcell.packages.${pkgs.system}.default ];
 
     stateVersion = "24.11";
   };

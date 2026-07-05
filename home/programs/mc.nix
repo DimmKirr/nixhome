@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib ? pkgs.lib, ... }:
 {
   enable = true;
   package = pkgs.mc;
@@ -117,8 +117,8 @@
       display_codepage = "UTF-8";
       source_codepage = "Other_8_bit";
       autodetect_codeset = "";
-      clipboard_store = "pbcopy";
-      clipboard_paste = "pbpaste";
+      clipboard_store = if pkgs.stdenv.isDarwin then "pbcopy" else "";
+      clipboard_paste = if pkgs.stdenv.isDarwin then "pbpaste" else "";
     };
 
     # Colors: keep section with empty values so mc doesn't override with defaults

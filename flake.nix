@@ -38,6 +38,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    devcell = {
+      url = "github:devcell-sh/devcell/v0.8.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
   };
 
   outputs =
@@ -77,7 +82,7 @@
                 # Include the home-manager module
                 users.dmitry = import ./home/dmitry/default.nix;
                 extraSpecialArgs = {
-                  inherit nixvim;
+                  inherit inputs nixvim;
                   pkgsUnstable = import inputs.nixpkgs-unstable {
                     system = "x86_64-linux";
                     config = {
@@ -131,7 +136,7 @@
                 useGlobalPkgs = true;
                 users.dmitry = import ./home/dmitry/default.nix;
                 extraSpecialArgs = {
-                  inherit nixvim;
+                  inherit inputs nixvim;
                   pkgsUnstable = import inputs.nixpkgs-unstable {
                     system = "x86_64-linux";
                     config = {
@@ -194,7 +199,7 @@
                   #                  mac-app-util.homeManagerModules.default # disabled trampolines for now.
                 ];
                 extraSpecialArgs = {
-                  inherit nixvim;
+                  inherit inputs nixvim;
                   # TODO refactor to have packages config in one place for both stable and unstable
                   pkgsUnstable = import inputs.nixpkgs-unstable {
                     system = "aarch64-darwin";
@@ -247,7 +252,7 @@
           pkgs = nixpkgs.legacyPackages.aarch64-linux;
           modules = [ ./hosts/devbox/default.nix ];
           extraSpecialArgs = {
-            inherit nixvim;
+            inherit inputs nixvim;
             pkgsUnstable = import inputs.nixpkgs-unstable {
               system = "aarch64-linux";
               config = {
@@ -273,7 +278,7 @@
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
           modules = [ ./hosts/devcell/default.nix ];
           extraSpecialArgs = {
-            inherit nixvim;
+            inherit inputs nixvim;
             pkgsUnstable = import inputs.nixpkgs-unstable {
               system = "x86_64-linux";
               config = {
@@ -295,7 +300,7 @@
           pkgs = nixpkgs.legacyPackages.aarch64-linux;
           modules = [ ./hosts/devcell/default.nix ];
           extraSpecialArgs = {
-            inherit nixvim;
+            inherit inputs nixvim;
             pkgsUnstable = import inputs.nixpkgs-unstable {
               system = "aarch64-linux";
               config = {

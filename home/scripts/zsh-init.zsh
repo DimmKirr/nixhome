@@ -80,7 +80,7 @@ _dynamic_completion() {
 #ize gen completion zsh > $HOME/.nix-profile/share/zsh/site-functions/_ize && chmod +rx $HOME/.nix-profile/share/zsh/site-functions/_ize
 
 # TODO: Move to 1Password https://samedwardes.com/blog/2023-11-28-1password-for-secret-dotfiles-update/
-source "/Volumes/SecureVault/profile/kireevco.rc"
+[ -f "/Volumes/SecureVault/profile/kireevco.rc" ] && source "/Volumes/SecureVault/profile/kireevco.rc"
 
 # Custom PATH for tools developed that require to be accessed globally
 # export PATH="$HOME/dev/automationd/atun/bin:$PATH" # disabled and managed in home manager main.

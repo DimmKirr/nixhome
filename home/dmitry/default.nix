@@ -29,6 +29,7 @@
 
       PATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/atun/bin"
+        "/run/wrappers/bin"
         "/run/current-system/sw/bin"
         "/nix/var/nix/profiles/default/bin"
         "$HOME/.local/share/mise/shims"

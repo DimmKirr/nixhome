@@ -1,6 +1,5 @@
 # macOS-specific home-manager settings
-{ config, lib, pkgs, ... }: {
-  # Launch agents for macOS services
+{ config, lib, pkgs, ... }: lib.mkIf pkgs.stdenv.isDarwin {
   launchd.agents.raycast = {
     enable = true;
     config = {

@@ -1,4 +1,4 @@
-{pkgs, ...}:
+{pkgs, lib, ...}:
 # TODO: Optimize for default fn key behavior
 let
   jsonFormat = pkgs.formats.json {};
@@ -414,6 +414,6 @@ let
   };
 
   generatedKarabinerJson = jsonFormat.generate "karabiner.json" karabinerConfig;
-in {
+in lib.mkIf pkgs.stdenv.isDarwin {
   home.file.".config/karabiner/karabiner.json".source = generatedKarabinerJson;
 }

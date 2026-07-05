@@ -19,7 +19,7 @@
   networking.firewall.allowedTCPPorts = [ 22 ];
 
   # Timezone
-  time.timeZone = "UTC";
+  time.timeZone = "America/New_York";
 
   # Locale
   i18n.defaultLocale = "en_US.UTF-8";
@@ -35,6 +35,28 @@
     LC_TIME = "en_US.UTF-8";
   };
 
+  # Desktop environment
+  services.xserver.enable = true;
+  services.xserver.displayManager.gdm.enable = true;
+  services.xserver.desktopManager.gnome.enable = true;
+  services.xserver.xkb = {
+    layout = "us";
+    variant = "";
+  };
+
+  # Printing
+  services.printing.enable = true;
+
+  # Audio
+  services.pulseaudio.enable = false;
+  security.rtkit.enable = true;
+  services.pipewire = {
+    enable = true;
+    alsa.enable = true;
+    alsa.support32Bit = true;
+    pulse.enable = true;
+  };
+
   # User account
   users.users.dmitry = {
     isNormalUser = true;
@@ -45,6 +67,7 @@
       "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAqHIzvxRZ+bixPYtLSoiMYu49l+a3T1Ejxn2xGW2bvuAAAACnNzaDpkbWl0cnk= dmitry@kirr.io"
       "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDDvjdNAdToapXBfMfhW688y2YsijBCbvBFrV0pqmOV5u/AaCK8MOFJcGnqkMui7ihmAQbf0DZ794hfdTVRMAccR9zR1YwIOB1SH/DPBrnCtHk8Y1I3iVvLaVCrQFRJyzcVMTOwG6mKJJTzQuuzvKteuxeublJuDGY4uAeaztfXVE5AJurVN2Xwc1sw/0RR6gXAKe0uGn92X9s0kdB/nbV9bJP4RTdIEHbm3TaVghYevrXU/amsT112wp4eYQEIUSWpegYRIv5cRaBzyLsvDrC9yNJdzIV9Zy6jUbUoFGWmuisgTPwfkaa2/mAhyulUizdT6Oj6f8leRpW6iVTr+CCi5s4TUx6DKjeP5SI/DDI2RZEUiF7xW89Sqf0dVw9tdSdzdI1TU7m5NW3aIC1/sFJ0JF06fqJFZ5/PKb4LhWvdI+mhwFkWVQsVYUKZiOpH1iwEa3eevb1eZZEYThaMA0zt0hT0vloF7rEZN28/CaB4fUzks8PHn5Zc3Srdvzfux5E="
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAgqQTngjpLZYFBBBu2z7N5s7+LCUjWZCfqkx5UrblKT"
+      "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBzW1JeZRJMGpMyRk64c/dlGK885BX86tW4h0W0tYu38bXge6nVEVOI/6MrmXp243rkj6Qp2QSdXidZY12w0aIIi="
     ];
   };
 
@@ -72,6 +95,7 @@
   programs.zsh.enable = true;
   programs.gnupg.agent.enable = true;
   programs.mtr.enable = true;
+  programs.firefox.enable = true;
 
   # SSH
   services.openssh = {
@@ -107,5 +131,5 @@
     };
   };
 
-  system.stateVersion = "24.11";
+  system.stateVersion = "26.05";
 }

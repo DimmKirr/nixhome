@@ -59,6 +59,59 @@
 
       # NixOS configurations for Linux hosts
       nixosConfigurations = {
+
+"nixie" = nixpkgs.lib.nixosSystem {
+  system = "x86_64-linux";
+  modules = [
+    ./hosts/nixie/hardware-configuration.nix
+    ./hosts/nixie/default.nix
+
+    home-manager.nixosModules.home-manager
+    {
+      home-manager = {
+ 
+useGlobalPkgs = true;    # reuse system pkgs → inherits allowUnfree + insecure perms
+       users.dmitry = import ./home/dmitry/default.nix;
+        extraSpecialArgs = {
+          inherit nixvim;
+          pkgsUnstable = import inputs.nixpkgs-unstable {
+            system = "x86_64-linux";
+            config = {
+              allowUnfree = true;
+              permittedInsecurePackages = [ "python-2.7.18.12" ];
+            };
+          };
+          pkgsEdge = import inputs.nixpkgs-edge {
+            system = "x86_64-linux";
+            config = {
+              allowUnfree = true;
+              permittedInsecurePackages = [ "python-2.7.18.12" ];
+            };
+          };
+        };
+      };
+    }
+  ];
+  specialArgs = {
+    inherit inputs;
+    inherit nixvim;
+    pkgsUnstable = import inputs.nixpkgs-unstable {
+      system = "x86_64-linux";
+      config = {
+        allowUnfree = true;
+        permittedInsecurePackages = [ "python-2.7.18.12" ];
+      };
+    };
+    pkgsEdge = import inputs.nixpkgs-edge {
+      system = "x86_64-linux";
+      config = {
+        allowUnfree = true;
+        permittedInsecurePackages = [ "python-2.7.18.12" ];
+      };
+    };
+  };
+};
+
         "jump" = nixpkgs.lib.nixosSystem {
           system = "x86_64-linux";
           modules = [

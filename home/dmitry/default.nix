@@ -14,7 +14,9 @@
       TZ = "UTC";
       PIPX_HOME = "$HOME/.local/pipx";
       PIPX_BIN_DIR = "$HOME/.local/bin";
-      DEVCELL_NIXHOME_PATH = "/Users/dmitry/dev/dimmkirr/devcell/nixhome";
+      DEVCELL_NIXHOME_PATH = if pkgs.stdenv.isDarwin
+        then "/Users/dmitry/dev/dimmkirr/devcell/nixhome"
+        else "/home/dmitry/dev/dimmkirr/devcell/nixhome";
       PYTHONPATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/yt-dl-plugins"
         "$PYTHONPATH"

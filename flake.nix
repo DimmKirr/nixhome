@@ -39,7 +39,7 @@
     };
 
     devcell = {
-      url = "github:devcell-sh/devcell/v0.8.0";
+      url = "github:devcell-sh/devcell/v0.8.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

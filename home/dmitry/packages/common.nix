@@ -136,7 +136,6 @@ let
     hurl
     fswatch
     home-assistant-cli
-    pipx
     shfmt
     ffmpeg
     mpv
@@ -180,6 +179,7 @@ let
     wireguard-tools
     opencode
     cloudflared
+    pipx
 
     google-cloud-sdk  # gcloud CLI including gcloud run
     google-cloud-sql-proxy

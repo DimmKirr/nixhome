@@ -1,0 +1,5 @@
+[tools]
+"pipx:pre-commit" = "latest"
+
+[hooks]
+postinstall = "pre-commit install"

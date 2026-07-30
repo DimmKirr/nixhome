@@ -1,6 +1,6 @@
-{pkgs, pkgsEdge, ...}: {
+{pkgs, pkgsUnstable, ...}: {
   enable = true;
-  package = pkgsEdge.mise;
+  package = pkgsUnstable.mise;
   enableZshIntegration = true;
   globalConfig = {
     tools = {
@@ -12,6 +12,7 @@
       go = "1.25.8";
     };
     settings = {
+      experimental = true;
       legacy_version_file = true;
     };
   };

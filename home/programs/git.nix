@@ -23,6 +23,9 @@
       rebase = false;
       ff = true;
     };
+    push = {
+      autoSetupRemote = true;
+    };
   };
 
   ignores = [

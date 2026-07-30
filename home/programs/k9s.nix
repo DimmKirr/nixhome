@@ -2,6 +2,10 @@
   enable = true;
   package = pkgsUnstable.k9s;
 
+  settings = {
+    k9s.ui.logoless = true;
+  };
+
   # Renamed from hotkey.hotKeys to hotKeys in home-manager 25.11+
   hotKeys = {
     f1 = {

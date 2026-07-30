@@ -205,12 +205,12 @@ in {
   homebrew = import ../../home/dmitry/packages/homebrew.nix;
 
   # Setapp-managed applications (requires Setapp cask above)
-  setapp = {
-    enable = true;
-    apps = [
-      "Commander One"
-    ];
-  };
+  # setapp = {
+  #   enable = true;
+  #   apps = [
+  #     "Commander One"
+  #   ];
+  # };
 
   # OSX preferences
   system.defaults = {

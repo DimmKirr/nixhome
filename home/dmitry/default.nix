@@ -6,7 +6,16 @@
   nixvim,
   lib,
   ...
-}: {
+}: let
+  androidSdk = pkgs.androidenv.composeAndroidPackages {
+    platformVersions = [ "35" ];
+    abiVersions = [ "arm64-v8a" ];
+    includeEmulator = true;
+    includeSystemImages = true;
+    systemImageTypes = [ "google_apis_playstore" ];
+    cmdLineToolsVersion = "11.0";
+  };
+in {
   # NOTE: Do NOT use pkgs.stdenv.isDarwin in imports section - causes infinite recursion
   # Platform-specific logic must be inside each module's config block
   home = {
@@ -35,11 +44,11 @@
         "/run/current-system/sw/bin"
         "/nix/var/nix/profiles/default/bin"
         "$HOME/.local/share/mise/shims"
+        "$HOME/.local/bin"
+        "$HOME/.cargo/bin"
+        "$HOME/.rbenv/bin"
         "$HOME/.nix-profile/sbin"
         "$HOME/.nix-profile/bin"
-        "$HOME/.cargo/bin"
-        "$HOME/.local/bin"
-        "$HOME/.rbenv/bin"
         "$HOME/.cache/npm/global/bin"
         "/usr/local/sbin"
         "/usr/local/bin"
@@ -47,6 +56,9 @@
         "/opt/homebrew/sbin"
         "$PATH"
       ];
+    } // lib.optionalAttrs pkgs.stdenv.isDarwin {
+      ANDROID_HOME = "${androidSdk.androidsdk}/libexec/android-sdk";
+      ANDROID_SDK_ROOT = "${androidSdk.androidsdk}/libexec/android-sdk";
     };
 
     packages =
@@ -78,14 +90,14 @@
     nixvim = import ../programs/nixvim.nix {inherit pkgs;};
     zoxide = import ../programs/zoxide.nix {inherit pkgs;};
     poetry = import ../programs/poetry.nix {inherit pkgs;};
-    mise = import ../programs/mise.nix {inherit pkgs pkgsEdge;};
+    mise = import ../programs/mise.nix {inherit pkgs pkgsUnstable;};
     ssh = import ../programs/ssh.nix {inherit pkgs;};
     k9s = import ../programs/k9s.nix {inherit pkgsUnstable;};
     zellij = import ../programs/zellij.nix {inherit pkgs;};
 
     zsh = import ../programs/zsh.nix {inherit pkgs pkgsUnstable;};
     mc = import ../programs/mc.nix {inherit pkgs;};
-    starship = import ../programs/starship.nix {};
+    starship = import ../programs/starship.nix { inherit pkgs; };
   };
 
   xdg.configFile."mc/skins/dracula256.ini".source = ../programs/mc-skins/dracula256.ini;
@@ -99,6 +111,24 @@
 #      enable = true;
 #      package = pkgsEdge.ollama;
 #    };
+  } // lib.optionalAttrs pkgs.stdenv.isDarwin {
+    colima = {
+      enable = true;
+      profiles.default = {
+        isActive = true;
+        isService = true;
+        setDockerHost = false;
+        settings = {
+          cpu = 8;
+          memory = 8;
+          disk = 60;
+          runtime = "docker";
+          vmType = "vz";
+          rosetta = true;
+          nestedVirtualization = true;
+        };
+      };
+    };
   };
 
   # All modules imported unconditionally - each module handles platform logic internally

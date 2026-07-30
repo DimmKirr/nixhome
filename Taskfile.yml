@@ -20,6 +20,160 @@ tasks:
     cmds:
       - sudo darwin-rebuild switch --flake .
 
+  prune:
+    desc: Prune all unused Nix store derivations
+    cmds:
+      - nix-collect-garbage -d
+      - nix store optimise
+
+  debug:colima:
+    desc: Debug colima VM state, nested virtualization, and /dev/kvm availability
+    cmds:
+      - |
+        set -eu
+        mkdir -p .context/debug
+        LOG=.context/debug/colima.log
+        : > "$LOG"
+        run() { echo "$@" | tee -a "$LOG"; eval "$@" 2>&1 | tee -a "$LOG"; echo | tee -a "$LOG"; }
+        log() { echo "$@" | tee -a "$LOG"; }
+        log "=== Host ==="
+        log "macOS version: $(sw_vers -productVersion 2>/dev/null || echo 'N/A')"
+        log "Chip: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'N/A')"
+        log "Rosetta installed: $(pgrep -q oahd && echo yes || echo no)"
+        log ""
+
+        log "=== Colima Status ==="
+        colima status 2>&1 | tee -a "$LOG" || log "(colima not running)"
+        log ""
+
+        log "=== Colima Version ==="
+        colima version 2>&1 | tee -a "$LOG"
+        log ""
+
+        log "=== Colima Config (default profile) ==="
+        cat ~/.colima/default/colima.yaml 2>/dev/null | tee -a "$LOG" || log "(no config found)"
+        log ""
+
+        log "=== Lima VM Config ==="
+        cat ~/.colima/_lima/default/lima.yaml 2>/dev/null | tee -a "$LOG" || log "(no lima config found)"
+        log ""
+
+        log "=== Lima VM Info ==="
+        limactl list 2>/dev/null | tee -a "$LOG" || log "(limactl not found)"
+        log ""
+
+        log "=== VM: /dev/kvm check ==="
+        colima ssh -- ls -la /dev/kvm 2>&1 | tee -a "$LOG" || log "/dev/kvm NOT available"
+        log ""
+
+        log "=== VM: CPU flags (vmx/svm) ==="
+        colima ssh -- grep -cE '(vmx|svm)' /proc/cpuinfo 2>&1 | tee -a "$LOG" || log "(no vmx/svm flags)"
+        log ""
+
+        log "=== VM: kernel modules ==="
+        colima ssh -- lsmod 2>&1 | grep -iE '(kvm|virt)' | tee -a "$LOG" || log "(no kvm/virt modules loaded)"
+        log ""
+
+        log "=== VM: kernel config KVM ==="
+        colima ssh -- zgrep -i kvm /proc/config.gz 2>&1 | tee -a "$LOG" || colima ssh -- grep -ri kvm /boot/config-* 2>&1 | tee -a "$LOG" || log "(kernel config not available)"
+        log ""
+
+        log "=== VM: dmesg kvm/virt ==="
+        colima ssh -- dmesg 2>&1 | grep -iE '(kvm|nested|virtuali)' | head -20 | tee -a "$LOG" || log "(no kvm/virt dmesg entries)"
+        log ""
+
+        log "=== VM: uname ==="
+        colima ssh -- uname -a 2>&1 | tee -a "$LOG"
+        log ""
+
+        log "=== VM: /dev listing (virt-related) ==="
+        colima ssh -- ls -la /dev/vhost* /dev/kvm /dev/vfio* 2>&1 | tee -a "$LOG" || log "(no virt devices)"
+        log ""
+
+        log "=== Nix Config (nestedVirtualization) ==="
+        grep -n 'nestedVirtualization\|vmType\|rosetta' home/dmitry/default.nix 2>/dev/null | tee -a "$LOG" || log "(not found in config)"
+        log ""
+
+        # [H1] Where does home-manager write colima config vs where colima reads it?
+        log "=== H1: Home-manager generated colima config files ==="
+        log "-- Searching for colima YAML files managed by home-manager --"
+        find ~/.config/colima -name '*.yaml' -o -name '*.yml' 2>/dev/null | while read f; do
+          log "--- $f ---"
+          cat "$f" 2>/dev/null | tee -a "$LOG"
+          log ""
+        done || log "(no files in ~/.config/colima)"
+        log ""
+        log "-- Searching XDG_CONFIG_HOME/colima --"
+        log "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-<unset>}"
+        log ""
+        log "-- Comparing colima config locations --"
+        log "~/.colima/default/colima.yaml (colima reads this):"
+        ls -la ~/.colima/default/colima.yaml 2>/dev/null | tee -a "$LOG" || log "(not found)"
+        log "~/.config/colima/default/colima.yaml (XDG location):"
+        ls -la ~/.config/colima/default/colima.yaml 2>/dev/null | tee -a "$LOG" || log "(not found)"
+        log ""
+        log "-- All colima-related files in ~/.config --"
+        find ~/.config -path '*colima*' -type f 2>/dev/null | head -20 | tee -a "$LOG" || log "(none)"
+        log ""
+
+        # [H1] Check COLIMA_HOME env var
+        log "=== H1: COLIMA_HOME env var ==="
+        log "COLIMA_HOME=${COLIMA_HOME:-<unset>}"
+        log ""
+
+        # [H2] Check the launchd plist to see how home-manager starts colima
+        log "=== H2: Launchd plist for colima service ==="
+        PLIST=$(find ~/Library/LaunchAgents -name '*colima*' 2>/dev/null | head -1)
+        if [ -n "$PLIST" ]; then
+          log "--- $PLIST ---"
+          cat "$PLIST" 2>/dev/null | tee -a "$LOG"
+        else
+          log "(no colima launchd plist found in ~/Library/LaunchAgents)"
+        fi
+        log ""
+        log "-- All colima-related launchd plists --"
+        find ~/Library/LaunchAgents -name '*colima*' 2>/dev/null | tee -a "$LOG" || log "(none)"
+        log ""
+        log "-- launchctl list | grep colima --"
+        launchctl list 2>/dev/null | grep -i colima | tee -a "$LOG" || log "(no colima in launchctl)"
+        log ""
+
+        # [H2] Check if home-manager activation script does anything with colima
+        log "=== H2: Home-manager colima activation ==="
+        log "-- Nix store colima service scripts --"
+        find /nix/store -maxdepth 2 -name '*colima*' -newer /nix/store/.nix-path-registration 2>/dev/null | head -20 | tee -a "$LOG" || log "(none found)"
+        log ""
+
+        # [H3] Diff nix settings vs actual colima.yaml
+        log "=== H3: Settings diff (nix vs actual) ==="
+        log "Nix wants: cpu=4 memory=8 disk=60 rosetta=true nestedVirtualization=true vmType=vz"
+        log "Actual colima.yaml:"
+        grep -E '^(cpu|memory|disk|rosetta|nestedVirtualization|vmType):' ~/.colima/default/colima.yaml 2>/dev/null | tee -a "$LOG" || log "(could not parse)"
+        log ""
+
+        # [H3] Check if home-manager wrote a colima template
+        log "=== H3: Colima templates ==="
+        log "-- ~/.colima/_templates/ --"
+        ls -la ~/.colima/_templates/ 2>/dev/null | tee -a "$LOG" || log "(no templates dir)"
+        cat ~/.colima/_templates/default.yaml 2>/dev/null | tee -a "$LOG" || log "(no default template)"
+        log ""
+
+        # [H1/H2] Check colima start command that would be used by service
+        log "=== H1/H2: How home-manager starts colima ==="
+        log "-- systemctl/launchd service status --"
+        launchctl print gui/$(id -u) 2>/dev/null | grep -i colima | tee -a "$LOG" || log "(not found in launchctl print)"
+        log ""
+
+        log "=== DOCKER_HOST ==="
+        log "DOCKER_HOST=${DOCKER_HOST:-<unset>}"
+        docker context ls 2>/dev/null | tee -a "$LOG" || log "(docker not found)"
+        log ""
+
+        log "=== Docker Info (server) ==="
+        docker info 2>&1 | grep -iE '(server version|storage|runtime|cgroup|kernel|operating system|architecture)' | tee -a "$LOG" || log "(docker info failed)"
+        log ""
+        log "=== Log saved to $LOG ==="
+
   debug:theme:
     desc: Dump full tmux theme/status state (run from inside tmux)
     cmds:

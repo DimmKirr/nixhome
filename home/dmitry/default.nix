@@ -120,12 +120,20 @@ in {
         setDockerHost = false;
         settings = {
           cpu = 8;
-          memory = 8;
+          memory = 24;
           disk = 60;
           runtime = "docker";
           vmType = "vz";
           rosetta = true;
           nestedVirtualization = true;
+          mounts = [
+            { location = "/Users"; writable = true; }
+            { location = "/Volumes"; writable = true; }
+            # /tmp itself is a reserved guest path in lima; /private/tmp is the
+            # real directory behind macOS's /tmp symlink
+            { location = "/private/tmp"; writable = true; }
+            { location = "/var/folders"; writable = true; }
+          ];
         };
       };
     };

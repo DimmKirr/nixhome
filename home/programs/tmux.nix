@@ -15,7 +15,7 @@
   #   nerdFonts = true;  # → rich icons (󰖐 󰖕 󰖙 …) + powerline separators
   theme     = import ./theme.nix {
     inherit lib;
-    preset    = "dracula";
+    preset    = if pkgs.stdenv.isDarwin then "dracula" else "catppuccin";
     nerdFonts = false;
   };
   framework = import ./tmux { inherit lib pkgs theme; };
@@ -142,6 +142,24 @@
     };
   };
 
+  snapshotList = pkgs.writeShellScript "tmux-snapshot-list" ''
+    ls -1 "$HOME/.config/tmuxp"/*.yaml 2>/dev/null \
+      | xargs -n1 basename \
+      | sed 's/\.yaml$//'
+  '';
+
+  snapshotDelete = pkgs.writeShellScript "tmux-snapshot-delete" ''
+    name="$1"
+    printf 'Delete snapshot "%s"? [y/N] ' "$name"
+    read -r ans
+    if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+      rm -f "$HOME/.config/tmuxp/$name.yaml"
+      echo "Deleted."
+    else
+      echo "Cancelled."
+    fi
+  '';
+
   # fzf-based session picker — replaces the upstream `andersondanilo/tmuxp-fzf`
   # plugin which shelled out to raw `tmuxp load` and bypassed our post-load
   # fixups (@label, pane_title, mirrored-preset re-apply, @layout-6..9).
@@ -153,10 +171,13 @@
       tmux display-message "tmux-snapshot: no tmuxp dir at $DIR"
       exit 0
     fi
-    name=$(ls -1 "$DIR"/*.yaml 2>/dev/null \
-             | xargs -n1 basename \
-             | sed 's/\.yaml$//' \
-             | ${pkgs.fzf}/bin/fzf --prompt='session> ' --reverse --height=100%)
+    name=$(${snapshotList} \
+             | ${pkgs.fzf}/bin/fzf \
+                 --prompt='session> ' \
+                 --layout=reverse \
+                 --tmux 60%,60% \
+                 --header='Enter: switch | Del: delete snapshot' \
+                 --bind "delete:execute(${snapshotDelete} {})+reload(${snapshotList})")
     [ -n "$name" ] || exit 0
     if tmux has-session -t "$name" 2>/dev/null; then
       tmux switch-client -t "$name"
@@ -399,15 +420,17 @@ in {
         #######################
         ##### Hubstaff ######
         #######################
-        # Auto-switch Hubstaff project when switching tmux sessions
+        # Auto-switch Hubstaff project when switching tmux sessions (macOS only)
+        ${if pkgs.stdenv.isDarwin then ''
         set-hook -g client-session-changed 'run-shell "/bin/sh ${../scripts/tmux/hs-hook.sh} #{session_name} #{client_name}"'
+        '' else ""}
 
         ###############################
         ##### Framework Status Bar ####
         ###############################
         # 2-row status bar — top row shows session + windows, bottom row shows
         # framework status-right modules. Matches the original Dracula layout.
-        set -g status              2
+        set -g status              ${if pkgs.stdenv.isDarwin then "2" else "1"}
         set -g status-style        'bg=${theme.palette.surface_2},fg=${theme.palette.fg}'
         # Match status-bg so command-prompts/menus don't pop in tmux's
         # default yellow-on-black. (Ticket: tmux-message-style-defaults-to-yellow-black)
@@ -456,8 +479,10 @@ in {
         # `#{T;=/#{status-right-length}:status-right}` (tmux-3.0-only
         # truncation directive that mangles on thin clients / older tmux).
         # (Ticket: tmux-thin-ssh-client-status-bar-distortion)
+        ${if pkgs.stdenv.isDarwin then ''
         set -g status-format[0] '#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
         set -g status-format[1] '#[align=centre]#[range=right]#{E:status-right}#[norange]'
+        '' else ""}
 
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'
@@ -521,7 +546,7 @@ in {
         # the session if it's already live, otherwise loads via
         # tmux-snapshot (so @label/pane_title/preset re-apply/@layout-6..9
         # all restore). Replaces the upstream tmuxp-fzf plugin.
-        bind T display-popup -E -w 60% -h 60% '${snapshotPicker}'
+        bind T run-shell '${snapshotPicker}'
       '';
     }
 

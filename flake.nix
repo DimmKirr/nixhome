@@ -193,6 +193,7 @@
             {
               home-manager = {
                 useGlobalPkgs = true;
+                backupFileExtension = "backup";
                 # include the home-manager module
                 users.dmitry = import ./home/dmitry/default.nix;
                 sharedModules = [

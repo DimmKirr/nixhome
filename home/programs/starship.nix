@@ -1,5 +1,7 @@
-{ ... }:
-{
+{ pkgs ? {}, lib ? {}, ... }:
+let
+  isLinux = pkgs ? stdenv && pkgs.stdenv.isLinux;
+in {
   enable = true;
 
   settings = {
@@ -16,7 +18,9 @@
     # tripping starship's ssh_only=true and show_always=false defaults).
     # Re-add `$username$hostname` here when you want it back on actual
     # remote sessions.
-    right_format = "$env_var$cmd_duration";
+    right_format = if isLinux
+      then "$hostname$env_var$cmd_duration"
+      else "$env_var$cmd_duration";
     add_newline = false;
 
     character = {
@@ -78,9 +82,9 @@
     };
 
     hostname = {
-      format   = "[@$hostname]($style) ";
+      format   = "[$hostname]($style) ";
       style    = "#8BE9FD"; # cyan
-      ssh_only = true;
+      ssh_only = !isLinux;
       disabled = false;
     };
 

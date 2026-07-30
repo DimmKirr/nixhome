@@ -10,14 +10,10 @@
   };
 
   taps = [
-    "hazelops/ize"
     "automationd/tap"
+    "hazelops/ize"
     "jeffreywildman/homebrew-virt-manager"
-    "gemfury/tap"
     "opencode-ai/tap"
-    "smokris/getwindowid"
-    "sikarugir-app/sikarugir"
-    "porter-dev/porter"
   ];
 
   casks = [
@@ -51,8 +47,8 @@
     "vlc"
     "mqttx"
     # "anydesk" # pinned — upgrade needs newer macOS # TODO: review if pin is still required
-    "linear-linear"
-    "windsurf"
+    "linear"
+    "devin-desktop"
     "goodsync"
     "readwise-ibooks"
     "inkscape"
@@ -71,13 +67,12 @@
     "zoom"
     "codex" # nix should work, but needs an overlay for newer version, so this for now.
     "hubstaff"
-    "Sikarugir-App/sikarugir/sikarugir"
+    "wine-stable"
   ];
 
   brews = [
-    "ize-dev"
-    "atun"
-    "fury-cli"
+    # "ize-dev" # disabled: brew trust doesn't persist for hazelops/ize tap
+    # "atun" # disabled: brew trust doesn't persist for automationd/tap
     "zlib"
     "openssl@3"
     "readline"
@@ -87,12 +82,12 @@
     "media-control"
     "timedog"
     "mint"
-    "getwindowid"
     "tiger-vnc" # broken on darwin in nixpkgs, using homebrew instead
     "qemu" # qemu-img and tools; nix qemu conflicts with androidsdk's bundled qemu-img
-    "porter-dev/porter/porter" # porter.run CLI — not in nixpkgs
     "mas"
     "libimobiledevice"
+    "winetricks"
+    "makensis"
   ];
 
   masApps = {

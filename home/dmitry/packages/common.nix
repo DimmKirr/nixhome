@@ -12,6 +12,7 @@ let
     findutils
     tree
     unzip
+    cabextract
     wget
     zstd
     nixd
@@ -66,6 +67,10 @@ let
     go
     cobra-cli
 
+    # Zig
+    zig
+    zls
+
     nil
 
     # Kubernetes
@@ -85,6 +90,7 @@ let
 
     pandoc
     tectonic
+    poppler-utils
 
     powershell
 
@@ -146,6 +152,8 @@ let
     # Mobile UI testing
     maestro
     imagemagick
+    wimlib
+    osslsigncode
   ];
 
   # Unstable channel packages
@@ -176,6 +184,7 @@ let
     packer
     audacity
 
+    tart
     wireguard-tools
     opencode
     cloudflared

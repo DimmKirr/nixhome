@@ -6,16 +6,7 @@
   nixvim,
   lib,
   ...
-}: let
-  androidSdk = pkgs.androidenv.composeAndroidPackages {
-    platformVersions = [ "35" ];
-    abiVersions = [ "arm64-v8a" ];
-    includeEmulator = true;
-    includeSystemImages = true;
-    systemImageTypes = [ "google_apis_playstore" ];
-    cmdLineToolsVersion = "11.0";
-  };
-in {
+}: {
   # NOTE: Do NOT use pkgs.stdenv.isDarwin in imports section - causes infinite recursion
   # Platform-specific logic must be inside each module's config block
   home = {
@@ -56,9 +47,6 @@ in {
         "/opt/homebrew/sbin"
         "$PATH"
       ];
-    } // lib.optionalAttrs pkgs.stdenv.isDarwin {
-      ANDROID_HOME = "${androidSdk.androidsdk}/libexec/android-sdk";
-      ANDROID_SDK_ROOT = "${androidSdk.androidsdk}/libexec/android-sdk";
     };
 
     packages =
@@ -114,6 +102,7 @@ in {
   } // lib.optionalAttrs pkgs.stdenv.isDarwin {
     colima = {
       enable = true;
+      package = pkgsUnstable.colima;
       profiles.default = {
         isActive = true;
         isService = true;

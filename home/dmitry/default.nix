@@ -123,6 +123,21 @@
             { location = "/private/tmp"; writable = true; }
             { location = "/var/folders"; writable = true; }
           ];
+          provision = [
+            {
+              mode = "system";
+              script = ''
+                #!/bin/bash
+                set -eu
+                if [ ! -f /swapfile ]; then
+                  fallocate -l 4G /swapfile
+                  chmod 600 /swapfile
+                  mkswap /swapfile
+                fi
+                swapon /swapfile 2>/dev/null || true
+              '';
+            }
+          ];
         };
       };
     };

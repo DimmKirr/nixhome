@@ -143,13 +143,11 @@
   };
 
   snapshotList = pkgs.writeShellScript "tmux-snapshot-list" ''
-    ls -1 "$HOME/.config/tmuxp"/*.yaml 2>/dev/null \
-      | xargs -n1 basename \
-      | sed 's/\.yaml$//'
+    tmux-snapshot list --ansi
   '';
 
   snapshotDelete = pkgs.writeShellScript "tmux-snapshot-delete" ''
-    name="$1"
+    name=$(printf '%s' "$1" | cut -f1)
     printf 'Delete snapshot "%s"? [y/N] ' "$name"
     read -r ans
     if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
@@ -171,14 +169,18 @@
       tmux display-message "tmux-snapshot: no tmuxp dir at $DIR"
       exit 0
     fi
-    name=$(${snapshotList} \
+    selection=$(${snapshotList} \
              | ${pkgs.fzf}/bin/fzf \
+                 --ansi \
+                 --delimiter=$'\t' \
+                 --nth=1 \
                  --prompt='session> ' \
                  --layout=reverse \
                  --tmux 60%,60% \
                  --header='Enter: switch | Del: delete snapshot' \
                  --bind "delete:execute(${snapshotDelete} {})+reload(${snapshotList})")
-    [ -n "$name" ] || exit 0
+    [ -n "$selection" ] || exit 0
+    name=$(printf '%s' "$selection" | cut -f1)
     if tmux has-session -t "$name" 2>/dev/null; then
       tmux switch-client -t "$name"
     elif tmux-snapshot load "$name" >/dev/null 2>&1; then

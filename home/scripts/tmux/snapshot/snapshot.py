@@ -977,6 +977,33 @@ def list_sessions(socket: str | None = None) -> list[str]:
     return [s for _, s in rows]
 
 
+def _parse_window_names(yaml_text: str) -> list[str]:
+    names: list[str] = []
+    for line in yaml_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            stripped = stripped[2:].strip()
+        if stripped.startswith("window_name:"):
+            val = stripped.split(":", 1)[1].strip().strip("'\"")
+            names.append(val)
+    return names
+
+
+def list_snapshots(out_dir: Path = DEFAULT_OUT_DIR) -> list[dict]:
+    out_dir = Path(out_dir)
+    result: list[dict] = []
+    for yaml_path in sorted(out_dir.glob("*.yaml")):
+        name = yaml_path.stem
+        text = yaml_path.read_text()
+        window_names = _parse_window_names(text)
+        result.append({
+            "name": name,
+            "window_count": len(window_names),
+            "window_names": window_names,
+        })
+    return result
+
+
 def save_all(socket: str | None = None,
              out_dir: Path = DEFAULT_OUT_DIR,
              manifest: Path | None = None) -> list[Path]:
@@ -1065,7 +1092,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_load = sub.add_parser("load",
                             help="tmuxp load + re-apply saved preset layouts")
-    p_load.add_argument("name", help="session name OR yaml path")
+    p_load.add_argument("names", nargs="+", help="session name(s) OR yaml path(s)")
+
+    p_list = sub.add_parser("list", help="list saved snapshots with window info")
+    p_list.add_argument("--ansi", action="store_true",
+                        help="output ANSI-colored window tags")
 
     args = p.parse_args(argv)
     out_dir = Path(args.out_dir).expanduser()
@@ -1078,12 +1109,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "load":
-        # Accept either a bare session name (resolved against out_dir) or
-        # an explicit path.
-        candidate = Path(args.name)
-        target_yaml = candidate if candidate.suffix == ".yaml" else out_dir / f"{args.name}.yaml"
-        load_session(target_yaml, socket=args.socket_path)
-        print(f"[OK] loaded {target_yaml.name}")
+        for name in args.names:
+            candidate = Path(name)
+            target_yaml = candidate if candidate.suffix == ".yaml" else out_dir / f"{name}.yaml"
+            load_session(target_yaml, socket=args.socket_path)
+            print(f"[OK] loaded {target_yaml.name}")
         return 0
 
     if args.cmd == "save-all":
@@ -1093,6 +1123,18 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_backup:
                 backup(path.stem, src=path, base=out_dir / "backups")
         print(f"[OK] .session-order ({len(written)} sessions)")
+        return 0
+
+    if args.cmd == "list":
+        snapshots = list_snapshots(out_dir)
+        use_ansi = args.ansi
+        tag_on = "\033[42;97m" if use_ansi else ""
+        tag_off = "\033[0m" if use_ansi else ""
+        for s in snapshots:
+            tags = "".join(
+                f"{tag_on} {w} {tag_off}" for w in s["window_names"]
+            )
+            print(f"{s['name']}\t{s['window_count']}\t{tags}")
         return 0
 
     return 2

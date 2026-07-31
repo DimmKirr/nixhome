@@ -2077,5 +2077,191 @@ class ReadPaneEnvContractTests(unittest.TestCase):
             proc.kill(); proc.wait()
 
 
+class MultiLoadTests(unittest.TestCase):
+    """Feature: `tmux-snapshot load A B C` loads multiple sessions sequentially."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def test_load_multiple_sessions_by_name(self):
+        """tmux-snapshot load A B C creates all three sessions."""
+        sock = self.fx.sock
+        env = self.fx.env
+        names = ["alpha", "bravo", "charlie"]
+        for i, name in enumerate(names):
+            tmux(sock, "new-session", "-d", "-s", name,
+                 "-x", "80", "-y", "24", "-n", f"win{i}", env=env)
+        for name in names:
+            snap.save_session(name, socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+
+        snap.load_session(self.fx.yaml_dir / "alpha.yaml",
+                          socket=self.fx.load_sock, env=env)
+        snap.load_session(self.fx.yaml_dir / "bravo.yaml",
+                          socket=self.fx.load_sock, env=env)
+        snap.load_session(self.fx.yaml_dir / "charlie.yaml",
+                          socket=self.fx.load_sock, env=env)
+        time.sleep(0.3)
+
+        sessions = sorted(tmux(self.fx.load_sock, "list-sessions",
+                               "-F", "#{session_name}", env=env).split())
+        self.assertEqual(sorted(names), sessions)
+
+    def test_cli_load_accepts_multiple_names(self):
+        """CLI: `tmux-snapshot load A B C` loads all three sessions."""
+        sock = self.fx.sock
+        env = self.fx.env
+        names = ["ses1", "ses2", "ses3"]
+        for name in names:
+            tmux(sock, "new-session", "-d", "-s", name,
+                 "-x", "80", "-y", "24", env=env)
+        for name in names:
+            snap.save_session(name, socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+
+        rc = snap.main(["-S", self.fx.load_sock,
+                        "-o", str(self.fx.yaml_dir),
+                        "load"] + names)
+        self.assertEqual(rc, 0)
+        time.sleep(0.3)
+
+        sessions = sorted(tmux(self.fx.load_sock, "list-sessions",
+                               "-F", "#{session_name}", env=env).split())
+        self.assertEqual(sorted(names), sessions)
+
+    def test_cli_load_single_name_still_works(self):
+        """Backward compat: `tmux-snapshot load A` still works."""
+        sock = self.fx.sock
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "only",
+             "-x", "80", "-y", "24", env=env)
+        snap.save_session("only", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+
+        rc = snap.main(["-S", self.fx.load_sock,
+                        "-o", str(self.fx.yaml_dir),
+                        "load", "only"])
+        self.assertEqual(rc, 0)
+        time.sleep(0.3)
+        out = tmux(self.fx.load_sock, "list-sessions",
+                   "-F", "#{session_name}", env=env).strip()
+        self.assertEqual(out, "only")
+
+    def test_cli_load_reports_each_session(self):
+        """CLI should print [OK] for each loaded session."""
+        sock = self.fx.sock
+        env = self.fx.env
+        for name in ["x", "y"]:
+            tmux(sock, "new-session", "-d", "-s", name,
+                 "-x", "80", "-y", "24", env=env)
+            snap.save_session(name, socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            snap.main(["-S", self.fx.load_sock,
+                       "-o", str(self.fx.yaml_dir),
+                       "load", "x", "y"])
+        output = buf.getvalue()
+        self.assertIn("[OK] loaded x.yaml", output)
+        self.assertIn("[OK] loaded y.yaml", output)
+
+
+class ListSnapshotsTests(unittest.TestCase):
+    """Feature: `tmux-snapshot list` shows session names with window info."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.yaml_dir = self.work / "tmuxp"
+        self.yaml_dir.mkdir()
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _write_yaml(self, name: str, window_names: list[str]) -> None:
+        lines = [f"session_name: {name}", "windows:"]
+        for wn in window_names:
+            lines.append(f"  - window_name: {wn}")
+            lines.append("    layout: abcd,80x24,0,0,0")
+            lines.append("    options: {}")
+            lines.append("    panes:")
+            lines.append("    - shell_command: zsh")
+            lines.append("      environment:")
+            lines.append("        CELL_ID: '1'")
+        (self.yaml_dir / f"{name}.yaml").write_text("\n".join(lines) + "\n")
+
+    def test_list_snapshots_returns_structured_data(self):
+        """list_snapshots() returns session info with window names."""
+        self._write_yaml("NMD", ["mc", "pve", "home"])
+        self._write_yaml("DIMM", ["dev", "logs"])
+        result = snap.list_snapshots(self.yaml_dir)
+        self.assertEqual(len(result), 2)
+        by_name = {r["name"]: r for r in result}
+        self.assertEqual(by_name["NMD"]["window_count"], 3)
+        self.assertEqual(by_name["NMD"]["window_names"], ["mc", "pve", "home"])
+        self.assertEqual(by_name["DIMM"]["window_count"], 2)
+        self.assertEqual(by_name["DIMM"]["window_names"], ["dev", "logs"])
+
+    def test_list_snapshots_empty_dir(self):
+        result = snap.list_snapshots(self.yaml_dir)
+        self.assertEqual(result, [])
+
+    def test_list_snapshots_sorted_alphabetically(self):
+        self._write_yaml("ZZZ", ["w1"])
+        self._write_yaml("AAA", ["w1"])
+        self._write_yaml("MMM", ["w1"])
+        result = snap.list_snapshots(self.yaml_dir)
+        names = [r["name"] for r in result]
+        self.assertEqual(names, ["AAA", "MMM", "ZZZ"])
+
+    def test_cli_list_outputs_formatted_lines(self):
+        """CLI: `tmux-snapshot list` outputs tab-separated lines."""
+        self._write_yaml("NMD", ["mc", "pve", "home"])
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = snap.main(["-o", str(self.yaml_dir), "list"])
+        self.assertEqual(rc, 0)
+        output = buf.getvalue()
+        self.assertIn("NMD", output)
+        self.assertIn("3", output)
+
+    def test_cli_list_with_ansi_flag(self):
+        """CLI: `tmux-snapshot list --ansi` outputs ANSI-colored tags."""
+        self._write_yaml("S1", ["alpha", "beta"])
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = snap.main(["-o", str(self.yaml_dir), "list", "--ansi"])
+        self.assertEqual(rc, 0)
+        output = buf.getvalue()
+        self.assertIn("\033[", output)
+        self.assertIn("alpha", output)
+        self.assertIn("beta", output)
+
+    def test_list_skips_non_yaml_files(self):
+        """Non-.yaml files in the directory are ignored."""
+        self._write_yaml("good", ["w1"])
+        (self.yaml_dir / ".session-order").write_text("good\n")
+        (self.yaml_dir / "notes.txt").write_text("not a yaml\n")
+        result = snap.list_snapshots(self.yaml_dir)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "good")
+
+    def test_list_handles_quoted_window_names(self):
+        """Window names with special chars are properly parsed."""
+        self._write_yaml("test", ["nmd.gg", "k3s"])
+        result = snap.list_snapshots(self.yaml_dir)
+        self.assertEqual(result[0]["window_names"], ["nmd.gg", "k3s"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

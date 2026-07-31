@@ -311,6 +311,18 @@ in {
   # + activateSettings at the end. The old code killed cfprefsd before
   # activateSettings, which raced (activateSettings needs cfprefsd alive).
   system.activationScripts.postActivation.text = ''
+    # --- Time Machine exclusions (idempotent — addexclusion is a no-op for already-excluded paths) ---
+    tmutil addexclusion -p /nix/store
+    tmutil addexclusion -p /nix/var
+    tmutil addexclusion -p /Users/dmitry/Library/Caches
+    tmutil addexclusion -p /Users/dmitry/.cache
+    tmutil addexclusion -p /Users/dmitry/.docker
+    tmutil addexclusion -p /Users/dmitry/.colima
+    tmutil addexclusion -p /Users/dmitry/.lima
+    tmutil addexclusion -p /Users/dmitry/Library/Developer
+    tmutil addexclusion -p /Users/dmitry/Library/Containers
+    tmutil addexclusion -p /Users/dmitry/.devcell
+
     # --- Write overrides (plist DB writes, no daemon interaction) ---
 
     # Traditional (non-natural) scroll direction — both domains so it sticks

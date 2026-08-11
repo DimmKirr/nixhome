@@ -8,17 +8,23 @@
  */
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "vhe_core.h"
 
 int main(void)
 {
     VHEState s = {0};
+    char line[128];
     char rw;
     uint32_t reg;
     uint64_t val;
 
-    while (scanf(" %c %" SCNx32 " %" SCNx64, &rw, &reg, &val) == 3) {
+    while (fgets(line, sizeof line, stdin) != NULL) {
+        if (line[strspn(line, " \t\r\n")] == '\0')
+            continue; /* skip blank lines, as scanf's " " would */
+        if (sscanf(line, " %c %" SCNx32 " %" SCNx64, &rw, &reg, &val) != 3)
+            break;
         uint32_t target = 0;
         VHEAction act;
 

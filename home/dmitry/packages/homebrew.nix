@@ -83,7 +83,7 @@
     "timedog"
     "mint"
     "tiger-vnc" # broken on darwin in nixpkgs, using homebrew instead
-    "qemu" # qemu-img and tools; nix qemu conflicts with androidsdk's bundled qemu-img
+    # qemu — moved to nix edge channel (darwin.nix) for HVF support
     "mas"
     "libimobiledevice"
     "winetricks"

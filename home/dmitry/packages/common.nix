@@ -79,6 +79,7 @@ let
     kube-capacity
 
     # qemu  # removed: conflicts with androidsdk's bundled qemu-img
+    android-tools
     spice
     freerdp
     virt-viewer

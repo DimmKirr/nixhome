@@ -12,19 +12,39 @@ version: '3'
 vars:
   DUMP_ROOT: '{{.ROOT_DIR}}/.context/tmux-theme-dump'
   TMUXP_DUMP_ROOT: '{{.ROOT_DIR}}/.context/tmuxp-debug'
+  QEMU_EL2_LOG: '{{.ROOT_DIR}}/.context/debug/qemu/el2.log'
+  VHE_DIR: '{{.ROOT_DIR}}/home/scripts/qemu/vhe'
 
 tasks:
   switch:
-    aliases: [apply]
-    desc: Build and activate the nix-darwin configuration
+    desc: Activate the nix-darwin configuration offline (no fresh nix cache)
     cmds:
-      - sudo darwin-rebuild switch --flake .
+      - sudo darwin-rebuild switch --flake . --offline
+      - tmux source-file ~/.config/tmux/tmux.conf
+
+  apply:
+    desc: Build and activate with fresh nix cache (refresh flake inputs/substitutes)
+    cmds:
+      - sudo darwin-rebuild switch --flake . --refresh
+      - tmux source-file ~/.config/tmux/tmux.conf
 
   prune:
     desc: Prune all unused Nix store derivations
     cmds:
       - nix-collect-garbage -d
       - nix store optimise
+
+  colima:ssh:
+    desc: SSH into the colima VM (home directory)
+    dir: '~'
+    cmds:
+      - colima ssh
+
+  colima:restart:
+    desc: Restart colima VM (picks up new CPU/memory/disk settings)
+    cmds:
+      - colima stop
+      - colima start --save-config=false
 
   debug:colima:
     desc: Debug colima VM state, nested virtualization, and /dev/kvm availability
@@ -993,3 +1013,384 @@ tasks:
         # ─── inventory ─────────────────────────────────────────────────────
         ls -1 "$DEST"
         printf '\n✓ debug dump at: %s\n' "$DEST"
+
+  # ── QEMU fake-el2 (FEAT_VHE emulation) — macOS-only compile debug ──────
+  # Run on the Mac after editing the VHE core/glue. Compiles the C that
+  # Linux can't (hvf.c only builds with the Apple SDK) and captures every
+  # error into .context/debug/qemu/el2.log for Claude to read back.
+  #
+  #   task debug:qemu:el2          — run all three, fresh log
+  #   task debug:qemu:el2:core     — just the standalone core (fast)
+  #   task debug:qemu:el2:replay   — just the replay harness
+  #   task debug:qemu:el2:qemu     — just the full QEMU build (the real check)
+  #
+  # NOTE: the QEMU build reads the flake's git tree — `git add` any new/edited
+  # files first or the build won't see them.
+  debug:qemu:el2:
+    desc: 'macOS: boot Alpine Linux ARM64 with patched QEMU+HVF'
+    silent: true
+    cmds:
+      - |
+        set -eu
+        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        {
+          echo "=== debug:qemu:el2 $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+          echo "host:  $(uname -srm)"
+          echo "macOS: $(sw_vers -productVersion 2>/dev/null || echo N/A)"
+          echo "nix:   $(nix --version 2>/dev/null || echo N/A)"
+        } > '{{.QEMU_EL2_LOG}}'
+      - task: debug:qemu:el2:boot
+      - |
+        echo
+        echo "── el2.log summary ──────────────────────────────────────────"
+        grep -E '^\[(boot)\].*VERDICT\|^\[(boot)\].*exit\|^\[(boot)\].*OK\|^\[(boot)\].*FAIL' '{{.QEMU_EL2_LOG}}' || true
+        echo
+        echo "Full log: {{.QEMU_EL2_LOG}}"
+
+  debug:qemu:el2:core:
+    desc: 'macOS: standalone compile + unit-test of vhe_core.c (Apple clang)'
+    silent: true
+    cmds:
+      - |
+        set -u
+        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        LOG='{{.QEMU_EL2_LOG}}'
+        VHE='{{.VHE_DIR}}'
+        {
+          echo
+          echo "### [core] standalone vhe_core.c compile + unit tests"
+        } >> "$LOG"
+        # strict compile of the core (no QEMU deps — pure C)
+        cc -std=gnu11 -Wall -Wextra -Werror -pedantic -I"$VHE" \
+           -c "$VHE/vhe_core.c" -o /tmp/vhe_core.o >> "$LOG" 2>&1
+        cc_rc=$?
+        echo "[core] compile exit=$cc_rc" >> "$LOG"
+        # build + run the unit suite
+        if cc -std=gnu11 -Wall -Wextra -Werror -I"$VHE" \
+              -o /tmp/test_vhe_core "$VHE/test_vhe_core.c" "$VHE/vhe_core.c" >> "$LOG" 2>&1; then
+          /tmp/test_vhe_core >> "$LOG" 2>&1
+          echo "[core] tests exit=$?" >> "$LOG"
+        else
+          echo "[core] test build FAILED (see log)" >> "$LOG"
+        fi
+        tail -1 "$LOG"
+
+  debug:qemu:el2:replay:
+    desc: 'macOS: compile vhe_replay.c + run the replay harness tests'
+    silent: true
+    cmds:
+      - |
+        set -u
+        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        LOG='{{.QEMU_EL2_LOG}}'
+        VHE='{{.VHE_DIR}}'
+        {
+          echo
+          echo "### [replay] vhe_replay.c compile + harness tests"
+        } >> "$LOG"
+        cc -std=gnu11 -Wall -Wextra -Werror -I"$VHE" \
+           -o /tmp/vhe_replay "$VHE/vhe_replay.c" "$VHE/vhe_core.c" >> "$LOG" 2>&1
+        echo "[replay] compile exit=$?" >> "$LOG"
+        if command -v python3 >/dev/null 2>&1; then
+          ( cd "$VHE" && python3 test_replay_sysreg_trace.py ) >> "$LOG" 2>&1
+          echo "[replay] harness tests exit=$?" >> "$LOG"
+        else
+          echo "[replay] python3 not found — skipped harness tests" >> "$LOG"
+        fi
+        tail -1 "$LOG"
+
+  debug:qemu:el2:qemu:
+    desc: 'macOS: compile ONLY hvf.c + vhe_core.c against real QEMU+HVF headers'
+    silent: true
+    cmds:
+      - |
+        set -u
+        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        LOG='{{.QEMU_EL2_LOG}}'
+        {
+          echo
+          echo "### [qemu] surgical compile-check — hvf.c + vhe_core.c only"
+          echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        } >> "$LOG"
+        NIX_EXPR='
+          let
+            flake = builtins.getFlake "git+file://{{.ROOT_DIR}}";
+            system = builtins.currentSystem;
+            pkgs = import flake.inputs.nixpkgs { inherit system; };
+            pkgsEdge = import flake.inputs.nixpkgs-edge { inherit system; };
+          in import {{.ROOT_DIR}}/home/dmitry/packages/qemu-hvf-compilecheck.nix { inherit pkgs pkgsEdge; }
+        '
+        rc=0
+        nix build --impure -L --no-link --print-out-paths \
+          --expr "$NIX_EXPR" >> "$LOG" 2>&1 || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          echo "[qemu] compile-check exit=$rc" >> "$LOG"
+          echo "" >> "$LOG"
+          echo "### [qemu] nix log (full build output):" >> "$LOG"
+          DRV=$(nix path-info --impure --derivation --expr "$NIX_EXPR" 2>/dev/null || true)
+          if [ -n "$DRV" ]; then
+            nix log "$DRV" >> "$LOG" 2>&1 || echo "(nix log failed for $DRV)" >> "$LOG"
+          else
+            echo "(could not resolve derivation path)" >> "$LOG"
+          fi
+          echo "" >> "$LOG"
+          echo "### [qemu] compiler errors (grep):" >> "$LOG"
+          grep -E '(error:|warning:|undefined|undeclared|fatal)' "$LOG" | tail -30 >> "$LOG" 2>/dev/null || true
+          echo "[qemu] COMPILE FAILED — see $LOG" | tee -a "$LOG"
+          exit 1
+        else
+          echo "[qemu] compile-check exit=0" >> "$LOG"
+          echo "[qemu] hvf.c + vhe_core.c compiled OK" | tee -a "$LOG"
+        fi
+
+  debug:qemu:el2:fullbuild:
+    desc: 'macOS: full QEMU build with VHE patches — produces qemu-system-aarch64'
+    silent: true
+    cmds:
+      - |
+        set -u
+        LOG='{{.QEMU_EL2_LOG}}'
+        {
+          echo
+          echo "### [fullbuild] full patched QEMU (qemu-rc.nix)"
+          echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        } >> "$LOG"
+        NIX_EXPR='
+          let
+            flake = builtins.getFlake "git+file://{{.ROOT_DIR}}";
+            system = builtins.currentSystem;
+            pkgs = import flake.inputs.nixpkgs { inherit system; };
+            pkgsEdge = import flake.inputs.nixpkgs-edge { inherit system; };
+          in import {{.ROOT_DIR}}/home/dmitry/packages/qemu-rc.nix { inherit pkgs pkgsEdge; }
+        '
+        rc=0
+        nix build --impure -L --no-link --print-out-paths \
+          --expr "$NIX_EXPR" >> "$LOG" 2>&1 || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          echo "[fullbuild] exit=$rc" >> "$LOG"
+          DRV=$(nix path-info --impure --derivation --expr "$NIX_EXPR" 2>/dev/null || true)
+          if [ -n "$DRV" ]; then
+            echo "### [fullbuild] nix log:" >> "$LOG"
+            nix log "$DRV" >> "$LOG" 2>&1 || true
+          fi
+          echo "[fullbuild] FULL BUILD FAILED — see $LOG" | tee -a "$LOG"
+          exit 1
+        else
+          OUT=$(nix build --impure --no-link --print-out-paths --expr "$NIX_EXPR" 2>/dev/null | head -1)
+          BINARY="$OUT/bin/qemu-system-aarch64"
+          if [ -x "$BINARY" ]; then
+            echo "[fullbuild] exit=0" >> "$LOG"
+            echo "[fullbuild] binary: $BINARY" >> "$LOG"
+            "$BINARY" --version >> "$LOG" 2>&1 || true
+            echo "[fullbuild] qemu-system-aarch64 built OK" | tee -a "$LOG"
+          else
+            echo "[fullbuild] exit=0 but binary not found at $BINARY" >> "$LOG"
+            echo "[fullbuild] store path: $OUT" >> "$LOG"
+            ls "$OUT/bin/" >> "$LOG" 2>&1 || true
+            echo "[fullbuild] WARNING — binary missing, see $LOG" | tee -a "$LOG"
+          fi
+        fi
+
+  debug:qemu:el2:boot:
+    desc: 'macOS: boot Alpine Linux ARM64 with HVF — smoke-test the built binary'
+    silent: true
+    cmds:
+      - |
+        set -u
+        LOG='{{.QEMU_EL2_LOG}}'
+        trap 'echo "[boot] script exited unexpectedly at line $LINENO (exit=$?)" >> "$LOG" 2>/dev/null || true' EXIT
+        CACHE="{{.ROOT_DIR}}/.context/debug/qemu/cache"
+        ALPINE_VER="3.21.3"
+        ALPINE_MINOR="3.21"
+        SERIAL_OUT="$CACHE/serial.log"
+        {
+          echo
+          echo "### [boot] Alpine Linux ARM64 — HVF + fake-el2=on (VHE emulation)"
+          echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        } >> "$LOG"
+
+        # resolve QEMU from nix store — bypass eval cache (H1) so patch changes
+        # are picked up immediately after editing.
+        NIX_EXPR='
+          let
+            flake = builtins.getFlake "git+file://{{.ROOT_DIR}}";
+            system = builtins.currentSystem;
+            pkgs = import flake.inputs.nixpkgs { inherit system; };
+            pkgsEdge = import flake.inputs.nixpkgs-edge { inherit system; };
+          in import {{.ROOT_DIR}}/home/dmitry/packages/qemu-rc.nix { inherit pkgs pkgsEdge; }
+        '
+        echo "[boot] building QEMU (--no-eval-cache to pick up patch changes)..." >> "$LOG"
+        QEMU_OUT=$(nix build --impure --no-eval-cache --no-link --print-out-paths --expr "$NIX_EXPR" 2>> "$LOG" | head -1)
+        if [ -z "$QEMU_OUT" ] || [ ! -d "$QEMU_OUT" ]; then
+          echo "[boot] BUILD FAILED — nix build returned empty or missing path" >> "$LOG"
+          echo "[boot] BUILD FAILED — see $LOG for compiler errors" | tee -a "$LOG"
+          trap - EXIT
+          exit 1
+        fi
+        QEMU="$QEMU_OUT/bin/qemu-system-aarch64"
+        echo "[boot] qemu: $QEMU" >> "$LOG"
+        echo "[boot] store path: $QEMU_OUT" >> "$LOG"
+
+        # download Alpine kernel + initramfs + ISO for direct kernel boot
+        mkdir -p "$CACHE"
+        KERNEL="$CACHE/vmlinuz-virt-${ALPINE_VER}"
+        INITRD="$CACHE/initramfs-virt-${ALPINE_VER}"
+        ISO="$CACHE/alpine-virt-${ALPINE_VER}-aarch64.iso"
+        BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_MINOR}/releases/aarch64"
+        for asset in netboot/vmlinuz-virt netboot/initramfs-virt; do
+          FNAME=$(basename "$asset")
+          LOCAL="$CACHE/${FNAME}-${ALPINE_VER}"
+          if [ ! -f "$LOCAL" ]; then
+            echo "[boot] downloading $BASE_URL/$asset" | tee -a "$LOG"
+            curl -fSL -o "$LOCAL.tmp" "$BASE_URL/$asset" >> "$LOG" 2>&1
+            mv "$LOCAL.tmp" "$LOCAL"
+          fi
+        done
+        if [ ! -f "$ISO" ]; then
+          echo "[boot] downloading ISO" | tee -a "$LOG"
+          curl -fSL -o "$ISO.tmp" "$BASE_URL/alpine-virt-${ALPINE_VER}-aarch64.iso" >> "$LOG" 2>&1
+          mv "$ISO.tmp" "$ISO"
+        fi
+        echo "[boot] kernel:  $KERNEL ($(du -h "$KERNEL" | cut -f1))" >> "$LOG"
+        echo "[boot] initrd:  $INITRD ($(du -h "$INITRD" | cut -f1))" >> "$LOG"
+        echo "[boot] iso:     $ISO ($(du -h "$ISO" | cut -f1))" >> "$LOG"
+
+        # boot with HVF + fake-el2, direct kernel (bypasses UEFI), ISO as root media
+        # loglevel=7: capture all kernel messages including CPU feature detection (H1)
+        # -cdrom: provide boot media so initramfs can mount rootfs (H2)
+        # QEMU_HVF_SYSREG_TRACE: capture sysreg traps to check if ID regs trap (H3)
+        SYSREG_TRACE="$CACHE/sysreg-trace.jsonl"
+        echo "[boot] booting Alpine (timeout 45s)..." | tee -a "$LOG"
+        rm -f "$SERIAL_OUT" "$SYSREG_TRACE"
+        QEMU_RC=0
+        QEMU_HVF_SYSREG_TRACE="$SYSREG_TRACE" \
+        timeout 45 "$QEMU" \
+          -machine virt,virtualization=on \
+          -accel hvf,fake-el2=on \
+          -cpu host \
+          -m 512 \
+          -display none \
+          -kernel "$KERNEL" \
+          -initrd "$INITRD" \
+          -append "console=ttyAMA0 loglevel=7" \
+          -cdrom "$ISO" \
+          -serial file:"$SERIAL_OUT" \
+          -monitor none \
+          -no-reboot \
+          >> "$LOG" 2>&1 || QEMU_RC=$?
+        echo "[boot] qemu exit=$QEMU_RC (124=timeout, 0=clean)" >> "$LOG"
+
+        # H1/H2: check VHE diagnostic output (fprintf to stderr, captured in LOG)
+        if grep -q '\[VHE-DIAG\]' "$LOG"; then
+          VHE_DIAG_COUNT=$(grep -c '\[VHE-DIAG\]' "$LOG" || echo 0)
+          echo "[boot] VHE diagnostic lines: $VHE_DIAG_COUNT found in QEMU stderr" >> "$LOG"
+          grep '\[VHE-DIAG\]' "$LOG" | sed 's/^/  /' >> "$LOG"
+        else
+          echo "[boot] WARNING: no [VHE-DIAG] lines — patch may not have compiled in" >> "$LOG"
+        fi
+
+        # H3: check TID3 trap activity (ID register reads now handled in our handler)
+        TID3_SET=$(grep -c '\[VHE-DIAG\] HCR_EL2 set TID3' "$LOG" 2>/dev/null || true)
+        TID3_TRAPS=$(grep -c '\[VHE-DIAG\] TID3 trap:' "$LOG" 2>/dev/null || true)
+        echo "[boot] TID3: set=$TID3_SET trap_count=$TID3_TRAPS" >> "$LOG"
+        if [ "$TID3_TRAPS" -gt 0 ]; then
+          echo "[boot] TID3 traps active — ID register reads routing through QEMU" >> "$LOG"
+          grep '\[VHE-DIAG\] TID3 trap:' "$LOG" | head -5 >> "$LOG" 2>/dev/null || true
+        fi
+        if [ -f "$SYSREG_TRACE" ]; then
+          TRACE_LINES=$(wc -l < "$SYSREG_TRACE" | tr -d ' ')
+          echo "[boot] sysreg trace: $TRACE_LINES entries in $SYSREG_TRACE" >> "$LOG"
+        else
+          echo "[boot] sysreg trace: file not created (trace patch not active?)" >> "$LOG"
+        fi
+
+        # check serial output
+        if [ ! -f "$SERIAL_OUT" ]; then
+          echo "[boot] no serial output captured" >> "$LOG"
+          echo "[boot] BOOT FAILED — no serial output" | tee -a "$LOG"
+          exit 1
+        fi
+        LINES=$(wc -l < "$SERIAL_OUT" | tr -d ' ')
+        echo "[boot] serial output: $LINES lines" >> "$LOG"
+        cat "$SERIAL_OUT" >> "$LOG"
+
+        # boot check
+        if grep -qi 'login:\|Welcome to Alpine\|Linux version' "$SERIAL_OUT"; then
+          echo "[boot] Alpine kernel booted" >> "$LOG"
+        elif grep -qi 'kernel\|Booting\|EFI stub' "$SERIAL_OUT"; then
+          echo "[boot] PARTIAL — kernel started, no login prompt in 45s" | tee -a "$LOG"
+        else
+          echo "[boot] no boot markers in serial output" >> "$LOG"
+          echo "[boot] BOOT FAILED — see $LOG" | tee -a "$LOG"
+          exit 1
+        fi
+
+        # VHE litmus: does the guest see FEAT_VHE?
+        if grep -q 'Virtualization Host Extensions' "$SERIAL_OUT"; then
+          echo "[boot] VERDICT: VHE — guest sees FEAT_VHE" | tee -a "$LOG"
+        elif grep -q 'nVHE\|Hyp nVHE' "$SERIAL_OUT"; then
+          echo "[boot] VERDICT: nVHE — guest does NOT see FEAT_VHE" | tee -a "$LOG"
+        elif grep -qi 'started at EL' "$SERIAL_OUT"; then
+          EL_LINE=$(grep -i 'started at EL' "$SERIAL_OUT" | head -1)
+          echo "[boot] EL info: $EL_LINE" >> "$LOG"
+          if grep -q 'VHE mode' "$SERIAL_OUT"; then
+            echo "[boot] VERDICT: VHE" | tee -a "$LOG"
+          else
+            echo "[boot] VERDICT: nVHE (no VHE mode line)" | tee -a "$LOG"
+          fi
+        else
+          echo "[boot] VERDICT: UNKNOWN — no VHE/nVHE markers in dmesg" | tee -a "$LOG"
+        fi
+        trap - EXIT
+
+  debug:qemu:el2:trace:
+    desc: 'macOS: replay real sysreg trace through VHE core, report unhandled regs'
+    silent: true
+    cmds:
+      - |
+        set -u
+        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        LOG='{{.QEMU_EL2_LOG}}'
+        VHE='{{.VHE_DIR}}'
+        TRACE_DIR="{{.ROOT_DIR}}/.context/debug/qemu"
+        TRACE_FILE="$TRACE_DIR/sysreg-trace.jsonl"
+        FIXTURE_FILE="$TRACE_DIR/windows-boot.fixture"
+        {
+          echo
+          echo "### [trace] sysreg trace capture + replay analysis"
+        } >> "$LOG"
+
+        if [ ! -f "$TRACE_FILE" ]; then
+          {
+            echo "[trace] no trace file at $TRACE_FILE"
+            echo "[trace] Boot a Windows guest with tracing enabled:"
+            echo "[trace]   QEMU_HVF_SYSREG_TRACE=$TRACE_FILE \\"
+            echo "[trace]     qemu-system-aarch64 -machine virt,virtualization=on -accel hvf,fake-el2=on ..."
+            echo "[trace] SKIP — capture trace first"
+          } >> "$LOG"
+          tail -1 "$LOG"
+          exit 0
+        fi
+
+        LINES=$(wc -l < "$TRACE_FILE" | tr -d ' ')
+        echo "[trace] trace file: $LINES lines" >> "$LOG"
+
+        # parse trace into replay fixture
+        python3 "{{.ROOT_DIR}}/home/scripts/qemu/parse_sysreg_trace.py" \
+          < "$TRACE_FILE" > "$FIXTURE_FILE" 2>> "$LOG"
+        echo "[trace] fixture: $(wc -l < "$FIXTURE_FILE" | tr -d ' ') lines → $FIXTURE_FILE" >> "$LOG"
+
+        # replay through VHE core (binary built by debug:qemu:el2:replay)
+        if [ ! -x /tmp/vhe_replay ]; then
+          echo "[trace] /tmp/vhe_replay not found — run debug:qemu:el2:replay first" >> "$LOG"
+          tail -1 "$LOG"
+          exit 1
+        fi
+        /tmp/vhe_replay < "$FIXTURE_FILE" >> "$LOG" 2>&1
+        rc=$?
+        echo "[trace] replay exit=$rc" >> "$LOG"
+        if [ "$rc" -ne 0 ]; then
+          echo "[trace] UNHANDLED SYSREGS — work queue:" >> "$LOG"
+          grep -i "unhandled\|unknown" "$LOG" | tail -20 >> "$LOG" 2>/dev/null || true
+        fi
+        tail -1 "$LOG"

@@ -1,0 +1,63 @@
+diff --git a/target/arm/hvf/hvf.c b/target/arm/hvf/hvf.c
+index da3ec52..4ba7de5 100644
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -157,6 +157,10 @@ void hvf_arm_init_debug(void)
+     os_release(config);
+ }
+ 
++/* JSON-line trace of sysreg traps, enabled by QEMU_HVF_SYSREG_TRACE env var */
++static FILE *hvf_sysreg_trace_fp;
++static bool hvf_sysreg_trace_checked;
++
+ #define SYSREG_OP0_SHIFT      20
+ #define SYSREG_OP0_MASK       0x3
+ #define SYSREG_OP0(sysreg)    ((sysreg >> SYSREG_OP0_SHIFT) & SYSREG_OP0_MASK)
+@@ -2457,7 +2461,7 @@ static int hvf_handle_exception(CPUState *cpu, hv_vcpu_exit_exception_t *excp)
+         bool isread = (syndrome >> 0) & 1;
+         uint32_t rt = (syndrome >> 5) & 0x1f;
+         uint32_t reg = syndrome & SYSREG_MASK;
+-        uint64_t val;
++        uint64_t val = 0;
+         int sysreg_ret = 0;
+ 
+         if (isread) {
+@@ -2478,6 +2482,38 @@ static int hvf_handle_exception(CPUState *cpu, hv_vcpu_exit_exception_t *excp)
+         }
+ 
+         advance_pc = !sysreg_ret;
++
++        if (!hvf_sysreg_trace_checked) {
++            const char *path = getenv("QEMU_HVF_SYSREG_TRACE");
++            if (path) {
++                if (strcmp(path, "stderr") == 0) {
++                    hvf_sysreg_trace_fp = stderr;
++                } else {
++                    hvf_sysreg_trace_fp = fopen(path, "a");
++                    if (!hvf_sysreg_trace_fp) {
++                        error_report("HVF sysreg trace: cannot open %s", path);
++                    }
++                }
++            }
++            hvf_sysreg_trace_checked = true;
++        }
++        if (hvf_sysreg_trace_fp) {
++            uint64_t trace_pc = 0;
++
++            hv_vcpu_get_reg(cpu->accel->fd, HV_REG_PC, &trace_pc);
++            fprintf(hvf_sysreg_trace_fp,
++                    "{\"pc\":\"0x%" PRIx64 "\",\"reg\":\"0x%x\","
++                    "\"op0\":%u,\"op1\":%u,\"crn\":%u,\"crm\":%u,\"op2\":%u,"
++                    "\"rw\":\"%s\",\"rt\":%u,\"val\":\"0x%" PRIx64 "\","
++                    "\"handled\":%s}\n",
++                    trace_pc, reg,
++                    (unsigned)SYSREG_OP0(reg), (unsigned)SYSREG_OP1(reg),
++                    (unsigned)SYSREG_CRN(reg), (unsigned)SYSREG_CRM(reg),
++                    (unsigned)SYSREG_OP2(reg),
++                    isread ? "r" : "w", rt, val,
++                    sysreg_ret ? "false" : "true");
++            fflush(hvf_sysreg_trace_fp);
++        }
+         break;
+     }
+     case EC_WFX_TRAP:

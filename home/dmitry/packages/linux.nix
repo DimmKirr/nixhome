@@ -1,6 +1,7 @@
 # Linux-only packages
 {
   pkgs,
+  pkgsEdge,
   ...
 }:
 with pkgs; [
@@ -17,7 +18,7 @@ with pkgs; [
   tigervnc       # vncviewer (broken on darwin)
 
   # Virtualization
-  qemu           # qemu-img and other QEMU tools
+  (import ./qemu-rc.nix { inherit pkgs pkgsEdge; })
 
   # Additional Linux tools
   alsa-utils     # Audio control

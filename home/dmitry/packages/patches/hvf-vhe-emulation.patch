@@ -1,0 +1,202 @@
+diff --git a/accel/hvf/hvf-all.c b/accel/hvf/hvf-all.c
+index 8bd9154..0fb0bbc 100644
+--- a/accel/hvf/hvf-all.c
++++ b/accel/hvf/hvf-all.c
+@@ -25,6 +25,7 @@
+ bool hvf_allowed;
+ bool hvf_kernel_irqchip;
+ bool hvf_nested_virt;
++bool hvf_fake_el2;
+ static bool hvf_kernel_irqchip_override;
+ 
+ void hvf_nested_virt_enable(bool nested_virt)
+@@ -269,6 +270,16 @@ static void hvf_set_kernel_irqchip(Object *obj, Visitor *v,
+     }
+ }
+ 
++static bool hvf_get_fake_el2(Object *obj, Error **errp)
++{
++    return hvf_fake_el2;
++}
++
++static void hvf_set_fake_el2(Object *obj, bool value, Error **errp)
++{
++    hvf_fake_el2 = value;
++}
++
+ static void hvf_accel_class_init(ObjectClass *oc, const void *data)
+ {
+     AccelClass *ac = ACCEL_CLASS(oc);
+@@ -282,6 +293,11 @@ static void hvf_accel_class_init(ObjectClass *oc, const void *data)
+         NULL, NULL);
+     object_class_property_set_description(oc, "kernel-irqchip",
+         "Configure HVF irqchip");
++    hvf_fake_el2 = false;
++    object_class_property_add_bool(oc, "fake-el2",
++        hvf_get_fake_el2, hvf_set_fake_el2);
++    object_class_property_set_description(oc, "fake-el2",
++        "Emulate FEAT_VHE for nested virtualization (Windows/WSL2)");
+ }
+ 
+ static const TypeInfo hvf_accel_type = {
+diff --git a/include/system/hvf.h b/include/system/hvf.h
+index a961df8..a7b9ecf 100644
+--- a/include/system/hvf.h
++++ b/include/system/hvf.h
+@@ -30,10 +30,13 @@ extern bool hvf_kernel_irqchip;
+ #define hvf_irqchip_in_kernel()  (hvf_kernel_irqchip)
+ extern bool hvf_nested_virt;
+ #define hvf_nested_virt_enabled()  (hvf_nested_virt)
++extern bool hvf_fake_el2;
++#define hvf_fake_el2_enabled()  (hvf_fake_el2)
+ #else /* !CONFIG_HVF_IS_POSSIBLE */
+ #define hvf_enabled() 0
+ #define hvf_irqchip_in_kernel() 0
+ #define hvf_nested_virt_enabled() 0
++#define hvf_fake_el2_enabled() 0
+ #endif /* !CONFIG_HVF_IS_POSSIBLE */
+ 
+ void hvf_nested_virt_enable(bool nested_virt);
+diff --git a/include/system/hvf_int.h b/include/system/hvf_int.h
+index a01691c..3aba6d3 100644
+--- a/include/system/hvf_int.h
++++ b/include/system/hvf_int.h
+@@ -50,6 +50,9 @@ struct AccelCPUState {
+     bool vtimer_masked;
+     bool guest_debug_enabled;
+     struct QEMUTimer *wfi_timer;
++    /* VHEState* for --fake-el2 shadow EL2 register file; NULL otherwise.
++     * Opaque here to avoid pulling the arm-specific header cross-arch. */
++    void *vhe;
+ #endif
+ };
+ 
+diff --git a/target/arm/hvf/hvf.c b/target/arm/hvf/hvf.c
+index 4ba7de5..416286a 100644
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -20,6 +20,7 @@
+ #include "hvf_arm.h"
+ #include "cpregs.h"
+ #include "cpu-sysregs.h"
++#include "vhe_core.h"
+ 
+ #include <mach/mach_time.h>
+ 
+@@ -1309,6 +1310,8 @@ void hvf_arch_vcpu_destroy(CPUState *cpu)
+         timer_free(cpu->accel->wfi_timer);
+         cpu->accel->wfi_timer = NULL;
+     }
++    g_free(cpu->accel->vhe);
++    cpu->accel->vhe = NULL;
+ }
+ 
+ static bool hvf_arm_el2_supported(void)
+@@ -1496,6 +1499,34 @@ int hvf_arch_init_vcpu(CPUState *cpu)
+                               GET_IDREG(&arm_cpu->isar, ID_AA64MMFR0));
+     assert_hvf_ok(ret);
+ 
++    fprintf(stderr, "[VHE-DIAG] fake_el2_enabled=%d\n", hvf_fake_el2_enabled());
++    if (hvf_fake_el2_enabled()) {
++        uint64_t before, after, hcr;
++        hv_vcpu_get_sys_reg(cpu->accel->fd, HV_SYS_REG_ID_AA64MMFR1_EL1,
++                            &before);
++        fprintf(stderr, "[VHE-DIAG] ID_AA64MMFR1_EL1 before=0x%016llx VH=%lld\n",
++                (unsigned long long)before, (long long)((before >> 8) & 0xf));
++        FIELD_DP64_IDREG(&arm_cpu->isar, ID_AA64MMFR1, VH, 1);
++        ret = hv_vcpu_set_sys_reg(cpu->accel->fd,
++                                  HV_SYS_REG_ID_AA64MMFR1_EL1,
++                                  GET_IDREG(&arm_cpu->isar, ID_AA64MMFR1));
++        fprintf(stderr, "[VHE-DIAG] hv_vcpu_set_sys_reg ret=%d (0=ok)\n", ret);
++        assert_hvf_ok(ret);
++        hv_vcpu_get_sys_reg(cpu->accel->fd, HV_SYS_REG_ID_AA64MMFR1_EL1,
++                            &after);
++        fprintf(stderr, "[VHE-DIAG] ID_AA64MMFR1_EL1 after=0x%016llx VH=%lld\n",
++                (unsigned long long)after, (long long)((after >> 8) & 0xf));
++        hv_vcpu_get_sys_reg(cpu->accel->fd, (hv_sys_reg_t)0xe088 /*HV_SYS_REG_HCR_EL2, macOS 15+*/, &hcr);
++        fprintf(stderr, "[VHE-DIAG] HCR_EL2 before TID3=0x%016llx\n",
++                (unsigned long long)hcr);
++        hcr |= (1ULL << 18);
++        ret = hv_vcpu_set_sys_reg(cpu->accel->fd, (hv_sys_reg_t)0xe088 /*HV_SYS_REG_HCR_EL2, macOS 15+*/, hcr);
++        fprintf(stderr, "[VHE-DIAG] HCR_EL2 set TID3 ret=%d after=0x%016llx\n",
++                ret, (unsigned long long)hcr);
++        assert_hvf_ok(ret);
++        cpu->accel->vhe = g_new0(VHEState, 1);
++    }
++
+     if (!hvf_irqchip_in_kernel()) {
+         cpu->accel->wfi_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
+                                              hvf_wfi_timer_cb, cpu);
+@@ -2464,6 +2485,63 @@ static int hvf_handle_exception(CPUState *cpu, hv_vcpu_exit_exception_t *excp)
+         uint64_t val = 0;
+         int sysreg_ret = 0;
+ 
++        /*
++         * --fake-el2 + TID3: ID_AA64* register reads (op0=3, op1=0, crn=0,
++         * crm=4..7) trap here. Return values from HVF API state which has
++         * our VH=1 modification for ID_AA64MMFR1_EL1.
++         */
++        if (hvf_fake_el2_enabled() && isread &&
++            SYSREG_OP0(reg) == 3 && SYSREG_OP1(reg) == 0 &&
++            SYSREG_CRN(reg) == 0 &&
++            SYSREG_CRM(reg) >= 4 && SYSREG_CRM(reg) <= 7) {
++            val = 0;
++            hv_vcpu_get_sys_reg(cpu->accel->fd,
++                (hv_sys_reg_t)(0xc000 |
++                    (SYSREG_CRM(reg) << 3) | SYSREG_OP2(reg)),
++                &val);
++            fprintf(stderr, "[VHE-DIAG] TID3 trap: crm=%u op2=%u -> 0x%016llx\n",
++                    SYSREG_CRM(reg), SYSREG_OP2(reg),
++                    (unsigned long long)val);
++            hvf_set_reg(cpu, rt, val);
++            advance_pc = true;
++            break;
++        }
++
++        /*
++         * --fake-el2: intercept EL2 sysregs (op1 == 4) and emulate FEAT_VHE
++         * against the per-vCPU shadow EL2 state. VHE_HANDLED completes here;
++         * VHE_REDIRECT_EL1 rewrites the access to the aliased EL1 register and
++         * falls through to the normal path; VHE_UNHANDLED also falls through so
++         * unknown registers keep QEMU's default behaviour.
++         */
++        if (hvf_fake_el2_enabled() && cpu->accel->vhe && SYSREG_OP1(reg) == 4) {
++            VHEState *vhe = cpu->accel->vhe;
++            uint32_t el1_target = 0;
++
++            if (isread) {
++                uint64_t v = 0;
++                VHEAction act = vhe_sysreg_read(vhe, reg, &v, &el1_target);
++                if (act == VHE_HANDLED) {
++                    hvf_set_reg(cpu, rt, v);
++                    advance_pc = true;
++                    break;
++                }
++                if (act == VHE_REDIRECT_EL1) {
++                    reg = el1_target;
++                }
++            } else {
++                uint64_t v = hvf_get_reg(cpu, rt);
++                VHEAction act = vhe_sysreg_write(vhe, reg, v, &el1_target);
++                if (act == VHE_HANDLED) {
++                    advance_pc = true;
++                    break;
++                }
++                if (act == VHE_REDIRECT_EL1) {
++                    reg = el1_target;
++                }
++            }
++        }
++
+         if (isread) {
+             sysreg_ret = hvf_sysreg_read(cpu, reg, &val);
+             if (!sysreg_ret) {
+diff --git a/target/arm/hvf/meson.build b/target/arm/hvf/meson.build
+index afc509a..4f85e79 100644
+--- a/target/arm/hvf/meson.build
++++ b/target/arm/hvf/meson.build
+@@ -1,3 +1,4 @@
+ arm_system_ss.add(when: [hvf, 'CONFIG_HVF'], if_true: files(
+   'hvf.c',
++  'vhe_core.c',
+ ))

@@ -2,6 +2,7 @@
 {
   pkgs,
   pkgsUnstable,
+  pkgsEdge,
   ...
 }:
 with pkgs; [
@@ -16,12 +17,13 @@ with pkgs; [
 
   docker-client
   libvirt
-  qemu
+  swtpm
 
   keepassxc
   discord      # x86_64 only, doesn't work on aarch64-linux
   seclists     # Large wordlist package - only on darwin, too big for devbox
 ] ++ (with pkgsUnstable; [
+  (import ./qemu-rc.nix { inherit pkgs pkgsEdge; })
   lima
   monitorcontrol
   betterdisplay

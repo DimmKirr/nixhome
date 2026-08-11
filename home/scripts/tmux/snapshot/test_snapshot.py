@@ -2263,5 +2263,123 @@ class ListSnapshotsTests(unittest.TestCase):
         self.assertEqual(result[0]["window_names"], ["nmd.gg", "k3s"])
 
 
+class PickerIntegrationTests(unittest.TestCase):
+    """Integration: simulate the prefix+T picker flow end-to-end."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def test_list_then_load_round_trip(self):
+        """list → pick first line → extract name → load succeeds."""
+        sock = self.fx.sock
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "project",
+             "-x", "80", "-y", "24", "-n", "editor", env=env)
+        tmux(sock, "new-window", "-t", "project", "-n", "logs", env=env)
+        snap.save_session("project", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            snap.main(["-o", str(self.fx.yaml_dir), "list", "--ansi"])
+        lines = buf.getvalue().strip().splitlines()
+        self.assertEqual(len(lines), 1)
+
+        line = lines[0]
+        parts = line.split("\t")
+        self.assertEqual(parts[0], "project")
+        self.assertEqual(parts[1], "2")
+        self.assertIn("editor", parts[2])
+        self.assertIn("logs", parts[2])
+        self.assertIn("\033[48;2;68;71;90;38;2;189;193;215m", parts[2])
+
+        name = parts[0]
+        rc = snap.main(["-S", self.fx.load_sock,
+                        "-o", str(self.fx.yaml_dir),
+                        "load", name])
+        self.assertEqual(rc, 0)
+        time.sleep(0.3)
+        sessions = tmux(self.fx.load_sock, "list-sessions",
+                        "-F", "#{session_name}", env=env).strip()
+        self.assertEqual(sessions, "project")
+
+    def test_delete_extracts_name_from_tabbed_line(self):
+        """Simulates what snapshotDelete does: cut -f1 | sed strip marker."""
+        import subprocess
+        line = "● NMD\t9\t\033[48;2;68;71;90;38;2;189;193;215m mc \033[0m"
+        result = subprocess.run(
+            ["sh", "-c", "cut -f1 | sed 's/^[● ]*//'"],
+            input=line, capture_output=True, text=True
+        )
+        self.assertEqual(result.stdout.strip(), "NMD")
+
+    def test_delete_extracts_name_without_marker(self):
+        """cut+sed on a non-live session (no marker) still works."""
+        import subprocess
+        line = "  DIMM\t3\ttags"
+        result = subprocess.run(
+            ["sh", "-c", "cut -f1 | sed 's/^[● ]*//'"],
+            input=line, capture_output=True, text=True
+        )
+        self.assertEqual(result.stdout.strip(), "DIMM")
+
+
+class MarkLiveTests(unittest.TestCase):
+    """Feature: `tmux-snapshot list --mark-live` marks active sessions."""
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def test_live_session_gets_marker(self):
+        """A session that's running in tmux gets the ● prefix."""
+        sock = self.fx.sock
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "alive",
+             "-x", "80", "-y", "24", env=env)
+        tmux(sock, "new-session", "-d", "-s", "other",
+             "-x", "80", "-y", "24", env=env)
+        snap.save_session("alive", socket=sock, out_dir=self.fx.yaml_dir)
+        snap.save_session("other", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-session", "-t", "other", env=env)
+
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            snap.main(["-S", sock, "-o", str(self.fx.yaml_dir),
+                       "list", "--mark-live"])
+        output = buf.getvalue()
+        lines = {l.split("\t")[0]: l for l in output.strip().splitlines()}
+        self.assertTrue(lines["● alive"].startswith("● alive"))
+        self.assertTrue(lines["  other"].startswith("  other"))
+
+    def test_no_mark_live_flag_omits_markers(self):
+        """Without --mark-live, no markers are prepended."""
+        sock = self.fx.sock
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "test",
+             "-x", "80", "-y", "24", env=env)
+        snap.save_session("test", socket=sock, out_dir=self.fx.yaml_dir)
+
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            snap.main(["-S", sock, "-o", str(self.fx.yaml_dir), "list"])
+        output = buf.getvalue()
+        self.assertTrue(output.startswith("test\t"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

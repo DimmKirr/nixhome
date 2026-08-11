@@ -1097,6 +1097,8 @@ def main(argv: list[str] | None = None) -> int:
     p_list = sub.add_parser("list", help="list saved snapshots with window info")
     p_list.add_argument("--ansi", action="store_true",
                         help="output ANSI-colored window tags")
+    p_list.add_argument("--mark-live", action="store_true",
+                        help="prepend a marker to sessions that are currently live in tmux")
 
     args = p.parse_args(argv)
     out_dir = Path(args.out_dir).expanduser()
@@ -1128,13 +1130,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "list":
         snapshots = list_snapshots(out_dir)
         use_ansi = args.ansi
-        tag_on = "\033[42;97m" if use_ansi else ""
+        tag_on = "\033[48;2;68;71;90;38;2;189;193;215m" if use_ansi else ""
         tag_off = "\033[0m" if use_ansi else ""
+        live: set[str] = set()
+        if args.mark_live:
+            try:
+                live = set(list_sessions(socket=args.socket_path))
+            except Exception:
+                pass
         for s in snapshots:
-            tags = "".join(
+            marker = "● " if s["name"] in live else "  " if live else ""
+            tags = " ".join(
                 f"{tag_on} {w} {tag_off}" for w in s["window_names"]
             )
-            print(f"{s['name']}\t{s['window_count']}\t{tags}")
+            print(f"{marker}{s['name']}\t{s['window_count']}\t{tags}")
         return 0
 
     return 2

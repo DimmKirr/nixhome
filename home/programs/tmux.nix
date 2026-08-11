@@ -1,5 +1,11 @@
 {pkgs, lib ? pkgs.lib, ...}: let
 
+  tmux-snapshot = pkgs.writers.writePython3Bin "tmux-snapshot" {
+    flakeIgnore = [ "E" "W" ];
+  } (
+    builtins.readFile ../scripts/tmux/snapshot/snapshot.py
+  );
+
   # Universal tmux theming framework — palettes, widgets, composer.
   # User-facing knob lives in ./theme.nix.
   #
@@ -33,7 +39,7 @@
 
     now=$(date +%s)
     if [ "$((now - last))" -ge "$interval" ]; then
-      if tmux-snapshot save-all >/dev/null 2>&1; then
+      if ${tmux-snapshot}/bin/tmux-snapshot save-all >/dev/null 2>&1; then
         tmux set -g @snapshot-last-save "$now"
       fi
     fi
@@ -58,7 +64,7 @@
     tmp="''${s}_bak_$$"
     tmux rename-session -t "$s" "$tmp" || {
       tmux display-message "tmux-snapshot: rename failed for $s"; exit 1; }
-    if tmux-snapshot load "$yaml" >/dev/null 2>&1; then
+    if ${tmux-snapshot}/bin/tmux-snapshot load "$yaml" >/dev/null 2>&1; then
       tmux switch-client -t "$s" 2>/dev/null
       tmux kill-session -t "$tmp" 2>/dev/null
       tmux display-message "tmux-snapshot: restored $s from snapshot"
@@ -93,7 +99,7 @@
         skipped=$((skipped + 1))
         continue
       fi
-      if tmux-snapshot load "$yaml" >/dev/null 2>&1; then
+      if ${tmux-snapshot}/bin/tmux-snapshot load "$yaml" >/dev/null 2>&1; then
         restored=$((restored + 1))
       else
         failed=$((failed + 1))
@@ -143,11 +149,11 @@
   };
 
   snapshotList = pkgs.writeShellScript "tmux-snapshot-list" ''
-    tmux-snapshot list --ansi
+    ${tmux-snapshot}/bin/tmux-snapshot list --ansi --mark-live
   '';
 
   snapshotDelete = pkgs.writeShellScript "tmux-snapshot-delete" ''
-    name=$(printf '%s' "$1" | cut -f1)
+    name=$(printf '%s' "$1" | cut -f1 | sed 's/^[● ]*//')
     printf 'Delete snapshot "%s"? [y/N] ' "$name"
     read -r ans
     if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
@@ -178,12 +184,13 @@
                  --layout=reverse \
                  --tmux 60%,60% \
                  --header='Enter: switch | Del: delete snapshot' \
-                 --bind "delete:execute(${snapshotDelete} {})+reload(${snapshotList})")
+                 --bind "delete:execute(${snapshotDelete} {})+reload(${snapshotList})" \
+             || true)
     [ -n "$selection" ] || exit 0
-    name=$(printf '%s' "$selection" | cut -f1)
+    name=$(printf '%s' "$selection" | cut -f1 | sed 's/^[● ]*//')
     if tmux has-session -t "$name" 2>/dev/null; then
       tmux switch-client -t "$name"
-    elif tmux-snapshot load "$name" >/dev/null 2>&1; then
+    elif ${tmux-snapshot}/bin/tmux-snapshot load "$name" >/dev/null 2>&1; then
       tmux switch-client -t "$name" 2>/dev/null
       tmux display-message "tmux-snapshot: loaded and switched to $name"
     else
@@ -529,10 +536,10 @@ in {
 
         # prefix + C-s : save CURRENT session.
         # prefix + M-s : save ALL sessions.
-        bind C-s run-shell 'tmux-snapshot save "#S" >/dev/null 2>&1 \
+        bind C-s run-shell '${tmux-snapshot}/bin/tmux-snapshot save "#S" >/dev/null 2>&1 \
           && tmux display-message "tmux-snapshot: saved #S to ~/.config/tmuxp/#S.yaml" \
           || tmux display-message "tmux-snapshot: FAILED to save #S — see ~/.config/tmuxp"'
-        bind M-s run-shell 'tmux-snapshot save-all >/dev/null 2>&1 \
+        bind M-s run-shell '${tmux-snapshot}/bin/tmux-snapshot save-all >/dev/null 2>&1 \
           && tmux display-message "tmux-snapshot: saved ALL sessions to ~/.config/tmuxp" \
           || tmux display-message "tmux-snapshot: FAILED to save all — see ~/.config/tmuxp"'
 

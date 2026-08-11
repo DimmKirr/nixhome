@@ -51,9 +51,9 @@
 
     packages =
       (import ./packages/common.nix { inherit pkgs pkgsUnstable pkgsEdge; })
-      ++ (lib.optionals pkgs.stdenv.isDarwin (import ./packages/darwin.nix { inherit pkgs pkgsUnstable; }))
-      ++ (lib.optionals pkgs.stdenv.isLinux (import ./packages/linux.nix { inherit pkgs; }))
-      ++ [ inputs.devcell.packages.${pkgs.system}.default ];
+      ++ (lib.optionals pkgs.stdenv.isDarwin (import ./packages/darwin.nix { inherit pkgs pkgsUnstable pkgsEdge; }))
+      ++ (lib.optionals pkgs.stdenv.isLinux (import ./packages/linux.nix { inherit pkgs pkgsEdge; }))
+      ;
 
     stateVersion = "24.11";
   };
@@ -108,8 +108,8 @@
         isService = true;
         setDockerHost = false;
         settings = {
-          cpu = 8;
-          memory = 24;
+          cpu = 10;
+          memory = 32;
           disk = 60;
           runtime = "docker";
           vmType = "vz";
@@ -130,7 +130,7 @@
                 #!/bin/bash
                 set -eu
                 if [ ! -f /swapfile ]; then
-                  fallocate -l 4G /swapfile
+                  fallocate -l 8G /swapfile
                   chmod 600 /swapfile
                   mkswap /swapfile
                 fi
@@ -155,7 +155,27 @@
     ./services/darwin.nix
     ./services/linux.nix
     nixvim.homeModules.nixvim
+    inputs.devcell.homeManagerModules.default
   ];
+
+  devcell = {
+    enable = true;
+    # Layered on top of Claude Code's built-in system prompt (--append-system-prompt-file).
+    # Do NOT use llm.system_prompt / prompt here — that REPLACES the built-in prompt entirely.
+    appendPrompt = ''
+      # Rules
+
+      - Never use claude share.
+      - Never commit changes unless instructed by a user.
+      - Do not use emdash (—) as it doesn't match the user's writing style. Use `:` instead or a different sentence structure.
+      - Present information in a concise, clean, to-the-point format: the user will ask to elaborate if needed. If the information contains multiple points, use markdown to list them sequentially. The user will ask about specifics and you elaborate as requested. This is needed for more efficient communication.
+        - Default: "top 3 idiomatic" options (~100 words), to help define the direction.
+        - If asked to break it down: top 5, to see the variety.
+        - Fit the whole response into one screen: max ~35 terminal lines, including blank lines and separator/graphic lines.
+      - If a directory contains an `.aiignore` file, treat it exactly like a `.gitignore` (Cursor's `.aiignore` format): parse it with gitignore syntax and exclude everything it matches from your work. Do not read, edit, or reference matched files, directories, sub-directories, or wildcard paths.
+      - If a project has `AGENTS.md`, treat it as `CLAUDE.md`: read it when you start.
+    '';
+  };
 }
 # Inspired by
 # https://github.com/evantravers/dotfiles/blob/4e9bc7a25ebc73389130567ab46b9cab78b5783e/home-manager/home.nix

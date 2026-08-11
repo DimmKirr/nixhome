@@ -132,16 +132,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1783260262,
-        "narHash": "sha256-+bmewbupALzE0H0/BKPkaNEQuBPChF2R1GWNuDBns+o=",
+        "lastModified": 1786378645,
+        "narHash": "sha256-Wm2qcC0cpkIan74e5rTy/lzSMVMHmL74l1dJJSzc/P0=",
         "owner": "devcell-sh",
         "repo": "devcell",
-        "rev": "24afa0023145179d7a3586c9cfbca3f7fc73907d",
+        "rev": "9d0664db848d5d5fc1514f17d5d084649af4d597",
         "type": "github"
       },
       "original": {
         "owner": "devcell-sh",
-        "ref": "v0.8.2",
+        "ref": "feature/wip",
         "repo": "devcell",
         "type": "github"
       }

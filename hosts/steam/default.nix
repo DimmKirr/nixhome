@@ -25,10 +25,10 @@
       EDITOR = "nvim";
       TERM = "xterm-256color";
       PATH = builtins.concatStringsSep ":" [
-        "$HOME/go/bin"
+        "$PATH"
         "$HOME/.nix-profile/bin"
         "$HOME/.local/bin"
-        "$PATH"
+        "$HOME/go/bin"
       ];
     };
 
@@ -57,7 +57,7 @@
     ]);
 
     file.".config/environment.d/10-nix.conf".text = ''
-      PATH=$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH
+      PATH=$PATH:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin
     '';
 
     file.".config/k3s/agent.service".text = ''

@@ -10,6 +10,8 @@ with pkgs; [
   wl-clipboard   # Wayland clipboard
   xdg-utils      # Default apps and desktop integration
 
+  watch          # procps — linux-only (moved from common.nix)
+
   # System utilities
   rofi           # App launcher (like raycast)
   ddcutil        # Monitor control

@@ -17,16 +17,17 @@
   pkgs,
   pkgsUnstable,
   pkgsEdge,
+  pkgsLegacy,
   nixvim,
   lib,
   ...
 }:
 let
   commonPackages = import ../../home/dmitry/packages/common.nix {
-    inherit pkgs pkgsUnstable pkgsEdge;
+    inherit pkgs pkgsUnstable pkgsEdge pkgsLegacy;
   };
   linuxPackages = import ../../home/dmitry/packages/linux.nix {
-    inherit pkgs;
+    inherit pkgs pkgsEdge;
   };
 in
 {

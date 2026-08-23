@@ -3,6 +3,7 @@
   inputs,
   pkgsUnstable,
   pkgsEdge,
+  pkgsLegacy,
   nixvim,
   lib,
   ...
@@ -48,7 +49,7 @@
     };
 
     packages =
-      (import ./packages/common.nix { inherit pkgs pkgsUnstable pkgsEdge; })
+      (import ./packages/common.nix { inherit pkgs pkgsUnstable pkgsEdge pkgsLegacy; })
       ++ (lib.optionals pkgs.stdenv.isDarwin (import ./packages/darwin.nix { inherit pkgs pkgsUnstable pkgsEdge; }))
       ++ (lib.optionals pkgs.stdenv.isLinux (import ./packages/linux.nix { inherit pkgs pkgsEdge; }))
       ;

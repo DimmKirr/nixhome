@@ -5,6 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     nixpkgs-edge.url = "github:NixOS/nixpkgs/master";
+    nixpkgs-legacy.url = "github:NixOS/nixpkgs/nixos-24.11"; # python2, removed packages
 
 
     nix-darwin = {
@@ -53,6 +54,7 @@
       nixpkgs,
       nixpkgs-unstable,
       nixpkgs-edge,
+      nixpkgs-legacy,
       #      mac-app-util,
       nixvim,
       ...
@@ -87,7 +89,7 @@
                     system = "x86_64-linux";
                     config = {
                       allowUnfree = true;
-                      permittedInsecurePackages = [ "python-2.7.18.12" ];
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
                     };
                   };
 
@@ -95,7 +97,15 @@
                     system = "x86_64-linux";
                     config = {
                       allowUnfree = true;
-                      permittedInsecurePackages = [ "python-2.7.18.12" ];
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "x86_64-linux";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
                     };
                   };
                 };
@@ -110,7 +120,7 @@
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
 
@@ -118,7 +128,15 @@
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
+              };
+            };
+
+            pkgsLegacy = import inputs.nixpkgs-legacy {
+              system = "x86_64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
           };
@@ -141,7 +159,7 @@
                     system = "x86_64-linux";
                     config = {
                       allowUnfree = true;
-                      permittedInsecurePackages = [ "python-2.7.18.12" ];
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
                     };
                   };
 
@@ -149,7 +167,15 @@
                     system = "x86_64-linux";
                     config = {
                       allowUnfree = true;
-                      permittedInsecurePackages = [ "python-2.7.18.12" ];
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "x86_64-linux";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
                     };
                   };
                 };
@@ -164,7 +190,7 @@
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
 
@@ -172,7 +198,15 @@
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
+              };
+            };
+
+            pkgsLegacy = import inputs.nixpkgs-legacy {
+              system = "x86_64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
           };
@@ -206,7 +240,7 @@
                     system = "aarch64-darwin";
                     config = {
                       allowUnfree = true;
-                      permittedInsecurePackages = [ "python-2.7.18.12" ];
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
                     };
                   };
 
@@ -214,7 +248,15 @@
                     system = "aarch64-darwin";
                     config = {
                       allowUnfree = true;
-                      permittedInsecurePackages = [ "python-2.7.18.12" ];
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "aarch64-darwin";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
                     };
                   };
 
@@ -232,7 +274,7 @@
               system = "aarch64-darwin";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
 
@@ -240,7 +282,15 @@
               system = "aarch64-darwin";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
+              };
+            };
+
+            pkgsLegacy = import inputs.nixpkgs-legacy {
+              system = "aarch64-darwin";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
           };
@@ -258,7 +308,7 @@
               system = "aarch64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
 
@@ -266,9 +316,17 @@
               system = "aarch64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "aarch64-linux";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
           };
         };
 
@@ -284,16 +342,24 @@
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
             pkgsEdge = import inputs.nixpkgs-edge {
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "x86_64-linux";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
           };
         };
 
@@ -307,16 +373,24 @@
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
             pkgsEdge = import inputs.nixpkgs-edge {
               system = "x86_64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "x86_64-linux";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
           };
         };
 
@@ -329,16 +403,24 @@
               system = "aarch64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
             pkgsEdge = import inputs.nixpkgs-edge {
               system = "aarch64-linux";
               config = {
                 allowUnfree = true;
-                permittedInsecurePackages = [ "python-2.7.18.12" ];
+                permittedInsecurePackages = [ "python-2.7.18.8" ];
               };
             };
+
+                  pkgsLegacy = import inputs.nixpkgs-legacy {
+                    system = "aarch64-linux";
+                    config = {
+                      allowUnfree = true;
+                      permittedInsecurePackages = [ "python-2.7.18.8" ];
+                    };
+                  };
           };
         };
       };

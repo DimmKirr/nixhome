@@ -3,6 +3,7 @@
   pkgs,
   pkgsUnstable,
   pkgsEdge,
+  pkgsLegacy,
   ...
 }:
 let
@@ -18,7 +19,7 @@ let
     nixd
     ripgrep
     htop
-    watch
+    # watch — moved to linux.nix (procps, linux-only)
     gnutar
     tmux
     direnv
@@ -38,7 +39,7 @@ let
     git-secrets
     lazygit
     # mc is managed via programs.mc in home/programs/mc.nix
-    python2
+    pkgsLegacy.python2  # EOL, removed from nixpkgs 26.05; pinned to 24.11
 
     kubernetes-helm
 
@@ -97,8 +98,7 @@ let
 
     localstack
     aria2
-    agg
-    asciinema
+    # agg, asciinema — duplicates, already listed above (lines 48-50)
     termsvg
 
     terraform-docs
@@ -185,7 +185,7 @@ let
     packer
     audacity
 
-    tart
+    # tart — moved to darwin.nix (macOS-only)
     wireguard-tools
     opencode
     cloudflared

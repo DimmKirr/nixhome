@@ -9,13 +9,14 @@
   pkgs,
   pkgsUnstable,
   pkgsEdge,
+  pkgsLegacy,
   nixvim,
   lib,
   ...
 }:
 let
   commonPackages = import ../../home/dmitry/packages/common.nix {
-    inherit pkgs pkgsUnstable pkgsEdge;
+    inherit pkgs pkgsUnstable pkgsEdge pkgsLegacy;
   };
   linuxPackages = import ../../home/dmitry/packages/linux.nix {
     inherit pkgs pkgsEdge;
@@ -42,6 +43,10 @@ in
     packages = commonPackages ++ linuxPackages ++ (with pkgs; [
       k3s
     ]);
+
+    file.".config/environment.d/10-nix.conf".text = ''
+      PATH=$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH
+    '';
   };
 
   fonts.fontconfig.enable = true;
@@ -67,6 +72,8 @@ in
 
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
+
+  targets.genericLinux.enable = true;
 
   imports = [
     nixvim.homeManagerModules.nixvim

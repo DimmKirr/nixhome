@@ -98,7 +98,9 @@
     tmux     = import ../../home/programs/tmux.nix     { pkgs = pkgsUnstable; };
     nixvim   = import ../../home/programs/nixvim.nix   { inherit pkgs; };
     zoxide   = import ../../home/programs/zoxide.nix   { inherit pkgs; };
-    zsh      = import ../../home/programs/zsh.nix      { inherit pkgs pkgsUnstable; };
+    zsh      = (import ../../home/programs/zsh.nix      { inherit pkgs pkgsUnstable; }) // {
+      shellAliases.sudo = ''sudo env PATH="$PATH"'';
+    };
     ssh      = import ../../home/programs/ssh.nix      { inherit pkgs; };
     starship = import ../../home/programs/starship.nix { };
     mc       = import ../../home/programs/mc.nix       { inherit pkgs; };

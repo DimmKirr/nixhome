@@ -214,6 +214,9 @@ in {
         set -g default-shell "/run/current-system/sw/bin/zsh"
         set -g default-command "/run/current-system/sw/bin/zsh"
 
+        # Switch to most recently active session instead of detaching
+        set -g detach-on-destroy off
+
         # Enable mouse support
         set -g mouse on
 

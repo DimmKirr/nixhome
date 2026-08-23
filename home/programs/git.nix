@@ -43,6 +43,7 @@
     ".jira"
     ".claude"
     ".context"
+    ".scratch"
     ".devcell"
     ".local"
     ".devcell.toml"

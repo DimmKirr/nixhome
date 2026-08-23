@@ -15,6 +15,7 @@ if ! "$HS" send status >/dev/null 2>&1; then
 fi
 
 case "$SESSION" in
+  CELL)  "$HS" send start-project --project_id 4165404 >/dev/null 2>&1 ;;
   DIMM)  "$HS" send start-project --project_id 3956770 >/dev/null 2>&1 ;;
   EVER)  "$HS" send start-project --project_id 3956768 >/dev/null 2>&1 ;;
   FAM)   "$HS" send start-project --project_id 3979460 >/dev/null 2>&1 ;;

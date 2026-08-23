@@ -355,6 +355,7 @@ alias hs-home-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start
 alias hs-nmd-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3736729"
 alias hs-ever-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956768"
 alias hs-upe-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956769"
+alias hs-cell-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 4165404"
 alias hs-dimm-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956770"
 alias hs-kirr-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3956771"
 alias hs-stop="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI stop"
@@ -412,6 +413,10 @@ hs-ever-toggle() {
 
 hs-upe-toggle() {
     _hs_toggle 3956769
+}
+
+hs-cell-toggle() {
+    _hs_toggle 4165404
 }
 
 hs-dimm-toggle() {

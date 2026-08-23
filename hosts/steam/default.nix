@@ -33,9 +33,6 @@
     };
 
     packages = with pkgs; [
-      # Core utilities
-      coreutils
-      findutils
       tree
       unzip
       wget
@@ -98,6 +95,13 @@
     tmux     = import ../../home/programs/tmux.nix     { pkgs = pkgsUnstable; };
     nixvim   = import ../../home/programs/nixvim.nix   { inherit pkgs; };
     zoxide   = import ../../home/programs/zoxide.nix   { inherit pkgs; };
+    bash = {
+      enable = true;
+      shellAliases = {
+        sudo = ''sudo env PATH="$PATH"'';
+        hms = "cd ~/.config/home-manager && git pull && home-manager switch --flake .#steam";
+      };
+    };
     zsh      = (import ../../home/programs/zsh.nix      { inherit pkgs pkgsUnstable; }) // {
       shellAliases.sudo = ''sudo env PATH="$PATH"'';
       shellAliases.hms = "cd ~/.config/home-manager && git pull && home-manager switch --flake .#steam";

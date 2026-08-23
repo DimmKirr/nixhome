@@ -57,7 +57,6 @@ let
     gentium
     paratype-pt-sans
     literata
-    google-fonts
 
     inetutils
 

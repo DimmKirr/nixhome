@@ -7,6 +7,7 @@
 }:
 with pkgs; [
   # mas # managed by homebrew (nix-darwin auto-installs via brew when masApps is non-empty)
+  google-fonts
   defaultbrowser
   raycast
   # ext4fuse — removed from nixpkgs (unmaintained, depends on fuse2, removed 2026-08-12)

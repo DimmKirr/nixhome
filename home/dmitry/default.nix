@@ -14,9 +14,7 @@
       TZ = "UTC";
       PIPX_HOME = "$HOME/.local/pipx";
       PIPX_BIN_DIR = "$HOME/.local/bin";
-      DEVCELL_NIXHOME_PATH = if pkgs.stdenv.isDarwin
-        then "/Users/dmitry/dev/dimmkirr/devcell/nixhome"
-        else "/home/dmitry/dev/dimmkirr/devcell/nixhome";
+      DEVCELL_NIXHOME_PATH = "$HOME/dev/devcell-sh/devcell/nixhome";
       PYTHONPATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/yt-dl-plugins"
         "$PYTHONPATH"
@@ -108,8 +106,8 @@
         isService = true;
         setDockerHost = false;
         settings = {
-          cpu = 10;
-          memory = 32;
+          cpu = 8;
+          memory = 24;
           disk = 60;
           runtime = "docker";
           vmType = "vz";
@@ -160,13 +158,23 @@
 
   devcell = {
     enable = true;
+    volumes = [
+      { mount = "/Users/dmitry/dev/dimmkirr/skills/"; }
+      { mount = "/Users/dmitry/dev/kirr/skills/"; }
+      { mount = "/Users/dmitry/dev/mad/skills/"; }
+      { mount = "/Users/dmitry/dev/ptc/skills/"; }
+      { mount = "/Users/dmitry/dev/kiwa/skills/"; }
+      { mount = "/Users/dmitry/dev/nmd/private-skills/"; }
+      { mount = "/Users/dmitry/dev/hazelops/skills/"; }
+      { mount = "/Users/dmitry/.cache/uv:/Users/dmitry/.cache/uv"; }
+    ];
     # Layered on top of Claude Code's built-in system prompt (--append-system-prompt-file).
     # Do NOT use llm.system_prompt / prompt here — that REPLACES the built-in prompt entirely.
     appendPrompt = ''
       # Rules
 
-      - Never use claude share.
-      - Never commit changes unless instructed by a user.
+      - Never publish artifacts. Deliver all work as files in the working directory or scratchpad, and summarize results in the response.
+      - Never commit changes unless instructed by a user. Never add "Co-Authored-By" to any commit message.
       - Do not use emdash (—) as it doesn't match the user's writing style. Use `:` instead or a different sentence structure.
       - Present information in a concise, clean, to-the-point format: the user will ask to elaborate if needed. If the information contains multiple points, use markdown to list them sequentially. The user will ask about specifics and you elaborate as requested. This is needed for more efficient communication.
         - Default: "top 3 idiomatic" options (~100 words), to help define the direction.
@@ -174,6 +182,13 @@
         - Fit the whole response into one screen: max ~35 terminal lines, including blank lines and separator/graphic lines.
       - If a directory contains an `.aiignore` file, treat it exactly like a `.gitignore` (Cursor's `.aiignore` format): parse it with gitignore syntax and exclude everything it matches from your work. Do not read, edit, or reference matched files, directories, sub-directories, or wildcard paths.
       - If a project has `AGENTS.md`, treat it as `CLAUDE.md`: read it when you start.
+      - If the Web Search tool is failing for any reason, use the playwright MCP tool instead.
+
+      # Scripts and Tools you create
+
+      - Any scripts you need to create for executing actions (e.g. Python scripts, shell scripts, temporary wrappers) must reside in `.scratch/tools/<task-you-needed-it-for>/<tool-name>.<ext>`. This structure keeps the repository clean from interim scripts and tools.
+      - Any screenshots taken during visual QA should go into `.scratch/screenshots/<dateISO>/<datetimeISO>-<ticket|purpose>-<image-content-desc>-<index>.<ext>`.
+      - Any illustrations or generated images should go into `.scratch/illustrations/<dateISO>/<datetimeISO>-<ticket|purpose>-<image-content-desc>-<index>.<ext>`.
     '';
   };
 }

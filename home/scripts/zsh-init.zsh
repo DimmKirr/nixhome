@@ -600,6 +600,57 @@ git-all() {
   git log --oneline --color=always "$@" | all-links
 }
 
+# AI-powered git commit message generator (uses local Ollama)
+aicommit() {
+  local diff model prompt response
+
+  diff=$(git diff --cached 2>/dev/null)
+  if [[ -z "$diff" ]]; then
+    echo "No staged changes. Stage files first with: git add <files>"
+    return 1
+  fi
+
+  model="${AICOMMIT_MODEL:-llama3.2:3b}"
+
+  prompt="Generate a single conventional commit message (type: subject) for this diff. Types: feat, fix, refactor, docs, chore, test, style, perf. Be concise. Output ONLY the commit message, nothing else.
+
+${diff:0:8000}"
+
+  response=$(curl -s --max-time 30 http://localhost:11434/api/generate \
+    -d "$(jq -n \
+      --arg model "$model" \
+      --arg prompt "$prompt" \
+      '{model: $model, prompt: $prompt, stream: false, options: {temperature: 0.3, num_predict: 100}}')" \
+    2>/dev/null)
+
+  if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
+    echo "Error: Could not connect to Ollama at localhost:11434"
+    echo "Make sure Ollama is running: ollama serve"
+    return 1
+  fi
+
+  local msg
+  msg=$(echo "$response" | jq -r '.response // empty' 2>/dev/null)
+
+  if [[ -z "$msg" ]]; then
+    echo "Error: No response from model"
+    echo "$response" | jq -r '.error // "Unknown error"' 2>/dev/null
+    return 1
+  fi
+
+  # Trim whitespace
+  msg=$(echo "$msg" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+  echo "$msg"
+
+  if [[ "$1" == "--commit" ]]; then
+    git commit -m "$msg"
+  else
+    echo ""
+    echo "Run 'aicommit --commit' to commit, or copy the message above."
+  fi
+}
+
 # Use 1Password SSH agent
 export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock
 

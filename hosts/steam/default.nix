@@ -51,7 +51,6 @@
 
       # Kubernetes
       k3s
-      kubectl
       kubernetes-helm
     ] ++ (with pkgsUnstable; [
       k9s

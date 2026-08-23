@@ -651,6 +651,184 @@ ${diff:0:8000}"
   fi
 }
 
+# AI-powered grouped commit message generator (uses local Ollama)
+# Analyzes all uncommitted changes, groups them by feature, and stores
+# the plan in .git/commit-groups.json for review before committing.
+#
+# Usage:
+#   aigroupcommit              # analyze changes and generate groups
+#   aigroupcommit --show       # show current plan
+#   aigroupcommit --commit     # commit each group in sequence
+#   aigroupcommit --reset      # delete the plan
+#   AICOMMIT_MODEL=qwen2:7b aigroupcommit  # use a different model
+aigroupcommit() {
+  local git_dir groups_file
+
+  git_dir=$(git rev-parse --git-dir 2>/dev/null)
+  if [[ $? -ne 0 ]]; then
+    echo "Error: not a git repository"
+    return 1
+  fi
+  groups_file="$git_dir/commit-groups.json"
+
+  # --reset: delete the plan
+  if [[ "$1" == "--reset" ]]; then
+    rm -f "$groups_file"
+    echo "Plan deleted."
+    return 0
+  fi
+
+  # --show: display current plan
+  if [[ "$1" == "--show" ]]; then
+    if [[ ! -f "$groups_file" ]]; then
+      echo "No plan found. Run 'aigroupcommit' first."
+      return 1
+    fi
+    local count
+    count=$(jq length "$groups_file")
+    echo "=== $count group(s) in plan ==="
+    echo ""
+    jq -r '.[] | "Group \(.id): \(.name)\n  Files: \(.files | join(", "))\n  Message: \(.message | split("\n") | .[0])\n"' "$groups_file"
+    return 0
+  fi
+
+  # --commit: execute the plan
+  if [[ "$1" == "--commit" ]]; then
+    if [[ ! -f "$groups_file" ]]; then
+      echo "No plan found. Run 'aigroupcommit' first."
+      return 1
+    fi
+
+    local count committed skipped
+    count=$(jq length "$groups_file")
+    committed=0
+    skipped=0
+
+    for i in $(seq 0 $((count - 1))); do
+      local group name files has_changes
+      group=$(jq -r ".[$i]" "$groups_file")
+      name=$(echo "$group" | jq -r '.name')
+      echo "=== Group $((i+1))/$count: $name ==="
+
+      git reset HEAD -- . 2>/dev/null || true
+
+      has_changes=false
+      while IFS= read -r f; do
+        if git diff --quiet HEAD -- ":/$f" 2>/dev/null; then
+          echo "  (skip) $f — already clean"
+        else
+          git add -- ":/$f"
+          has_changes=true
+        fi
+      done < <(echo "$group" | jq -r '.files[]')
+
+      if [[ "$has_changes" == "true" ]] && ! git diff --cached --quiet; then
+        echo "$group" | jq -r '.message' | git commit -F -
+        committed=$((committed + 1))
+      else
+        echo "  ⏭  All files already committed, skipping group."
+        skipped=$((skipped + 1))
+      fi
+      echo ""
+    done
+
+    echo "Done: $committed committed, $skipped skipped (of $count groups)."
+    rm -f "$groups_file"
+    return 0
+  fi
+
+  # Default: analyze and generate groups
+  local diff
+  diff=$(git diff HEAD 2>/dev/null)
+  if [[ -z "$diff" ]]; then
+    echo "No uncommitted changes."
+    return 1
+  fi
+
+  local model prompt response
+  model="${AICOMMIT_MODEL:-llama3.2:3b}"
+
+  # Get list of changed files for context
+  local changed_files
+  changed_files=$(git diff --name-only HEAD 2>/dev/null)
+
+  prompt='Analyze this git diff and group the changes by feature. Return ONLY valid JSON, no explanation.
+
+Output format — a JSON array:
+[
+  {
+    "id": 1,
+    "name": "Short feature name",
+    "files": ["path/to/file1", "path/to/file2"],
+    "message": "type(scope): one-line summary\n\n- type(scope): detail"
+  }
+]
+
+Rules:
+- Group related files that form a single logical change
+- Use conventional commit types: feat, fix, refactor, docs, chore, test, style, perf
+- Each file must appear in exactly one group
+- Order groups by dependency (foundational first)
+- Message first line under 72 chars
+
+Changed files:
+'"$changed_files"'
+
+Diff (truncated to 8000 chars):
+'"${diff:0:8000}"
+
+  response=$(curl -s --max-time 60 http://localhost:11434/api/generate \
+    -d "$(jq -n \
+      --arg model "$model" \
+      --arg prompt "$prompt" \
+      '{model: $model, prompt: $prompt, stream: false, options: {temperature: 0.3, num_predict: 2000}}')" \
+    2>/dev/null)
+
+  if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
+    echo "Error: Could not connect to Ollama at localhost:11434"
+    return 1
+  fi
+
+  local raw_json
+  raw_json=$(echo "$response" | jq -r '.response // empty' 2>/dev/null)
+
+  if [[ -z "$raw_json" ]]; then
+    echo "Error: No response from model"
+    echo "$response" | jq -r '.error // "Unknown error"' 2>/dev/null
+    return 1
+  fi
+
+  # Extract JSON array from response (model may wrap it in markdown fences)
+  local clean_json
+  clean_json=$(echo "$raw_json" | sed -n '/\[/,/\]/p' | head -100)
+
+  # Validate JSON
+  if ! echo "$clean_json" | jq '.' >/dev/null 2>&1; then
+    echo "Error: Model returned invalid JSON. Raw response:"
+    echo "$raw_json"
+    return 1
+  fi
+
+  # Verify all changed files are covered
+  local grouped_files missing
+  grouped_files=$(echo "$clean_json" | jq -r '.[].files[]' | sort)
+  missing=$(comm -23 <(echo "$changed_files" | sort) <(echo "$grouped_files"))
+
+  if [[ -n "$missing" ]]; then
+    echo "Warning: these files were not assigned to any group:"
+    echo "$missing" | sed 's/^/  /'
+    echo ""
+  fi
+
+  echo "$clean_json" | jq '.' > "$groups_file"
+
+  echo "Plan saved to $groups_file"
+  echo ""
+  aigroupcommit --show
+  echo "Review/edit: $groups_file"
+  echo "Commit: aigroupcommit --commit"
+}
+
 # Use 1Password SSH agent
 export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock
 

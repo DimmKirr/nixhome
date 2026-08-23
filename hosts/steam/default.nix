@@ -59,6 +59,33 @@
     file.".config/environment.d/10-nix.conf".text = ''
       PATH=$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH
     '';
+
+    file.".config/k3s/agent.service".text = ''
+      [Unit]
+      Description=K3s Agent
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=exec
+      EnvironmentFile=-/home/deck/.config/k3s/env
+      ExecStart=/home/deck/.nix-profile/bin/k3s agent --snapshotter=native
+      Restart=always
+      RestartSec=5
+      KillMode=process
+      Delegate=yes
+      LimitNOFILE=1048576
+      LimitNPROC=infinity
+      LimitCORE=infinity
+
+      [Install]
+      WantedBy=multi-user.target
+    '';
+
+    file.".config/k3s/env".text = ''
+      # K3S_URL=https://192.168.8.150:6443
+      # K3S_TOKEN=<node-token>
+    '';
   };
 
   fonts.fontconfig.enable = true;
@@ -81,6 +108,8 @@
   xdg.configFile."mc/skins/dracula256.ini".source = ../../home/programs/mc-skins/dracula256.ini;
   xdg.configFile."vifm/vifmrc".source             = ../../home/programs/vifm/vifmrc;
   xdg.configFile."vifm/colors".source             = ../../home/programs/vifm/colors;
+
+  programs.zsh.shellAliases.sudo = ''sudo env PATH="$PATH"'';
 
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];

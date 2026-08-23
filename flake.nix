@@ -297,6 +297,29 @@
           };
         };
 
+        # Steam machine (SteamOS) — standalone home-manager, user `deck`.
+        "steam" = home-manager.lib.homeManagerConfiguration {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          modules = [ ./hosts/steam/default.nix ];
+          extraSpecialArgs = {
+            inherit inputs nixvim;
+            pkgsUnstable = import inputs.nixpkgs-unstable {
+              system = "x86_64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.12" ];
+              };
+            };
+            pkgsEdge = import inputs.nixpkgs-edge {
+              system = "x86_64-linux";
+              config = {
+                allowUnfree = true;
+                permittedInsecurePackages = [ "python-2.7.18.12" ];
+              };
+            };
+          };
+        };
+
         "devcell-aarch64" = home-manager.lib.homeManagerConfiguration {
           pkgs = nixpkgs.legacyPackages.aarch64-linux;
           modules = [ ./hosts/devcell/default.nix ];

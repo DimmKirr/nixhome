@@ -39,6 +39,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    nix-flatpak.url = "github:gmodena/nix-flatpak";
+
     devcell = {
       url = "github:devcell-sh/devcell/feature/wip";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -366,7 +368,10 @@
         # Steam machine (SteamOS) — standalone home-manager, user `deck`.
         "steam" = home-manager.lib.homeManagerConfiguration {
           pkgs = nixpkgs.legacyPackages.x86_64-linux;
-          modules = [ ./hosts/steam/default.nix ];
+          modules = [
+            inputs.nix-flatpak.homeManagerModules.nix-flatpak
+            ./hosts/steam/default.nix
+          ];
           extraSpecialArgs = {
             inherit inputs nixvim;
             pkgsUnstable = import inputs.nixpkgs-unstable {

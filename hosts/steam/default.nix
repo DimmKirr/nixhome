@@ -116,6 +116,23 @@
   xdg.configFile."vifm/vifmrc".source             = ../../home/programs/vifm/vifmrc;
   xdg.configFile."vifm/colors".source             = ../../home/programs/vifm/colors;
 
+  services.flatpak = {
+    remotes = [
+      {
+        name = "flathub";
+        location = "https://flathub.org/repo/flathub.flatpakrepo";
+      }
+      {
+        name = "GeForceNOW";
+        location = "https://international.download.nvidia.com/GFNLinux/flatpak/geforcenow.flatpakrepo";
+      }
+    ];
+    packages = [
+      { appId = "com.nvidia.geforcenow"; origin = "GeForceNOW"; }
+    ];
+    update.onActivation = true;
+  };
+
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
 

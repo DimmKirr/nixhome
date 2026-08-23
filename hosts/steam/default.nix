@@ -100,6 +100,7 @@
     zoxide   = import ../../home/programs/zoxide.nix   { inherit pkgs; };
     zsh      = (import ../../home/programs/zsh.nix      { inherit pkgs pkgsUnstable; }) // {
       shellAliases.sudo = ''sudo env PATH="$PATH"'';
+      shellAliases.hms = "cd ~/.config/home-manager && git pull && home-manager switch --flake .#steam";
     };
     ssh      = import ../../home/programs/ssh.nix      { inherit pkgs; };
     starship = import ../../home/programs/starship.nix { };

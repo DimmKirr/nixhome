@@ -72,7 +72,7 @@ index a01691c..3aba6d3 100644
  };
  
 diff --git a/target/arm/hvf/hvf.c b/target/arm/hvf/hvf.c
-index 4ba7de5..416286a 100644
+index 4ba7de5..4404c1d 100644
 --- a/target/arm/hvf/hvf.c
 +++ b/target/arm/hvf/hvf.c
 @@ -20,6 +20,7 @@
@@ -92,7 +92,7 @@ index 4ba7de5..416286a 100644
  }
  
  static bool hvf_arm_el2_supported(void)
-@@ -1496,6 +1499,34 @@ int hvf_arch_init_vcpu(CPUState *cpu)
+@@ -1496,6 +1499,98 @@ int hvf_arch_init_vcpu(CPUState *cpu)
                                GET_IDREG(&arm_cpu->isar, ID_AA64MMFR0));
      assert_hvf_ok(ret);
  
@@ -113,21 +113,85 @@ index 4ba7de5..416286a 100644
 +                            &after);
 +        fprintf(stderr, "[VHE-DIAG] ID_AA64MMFR1_EL1 after=0x%016llx VH=%lld\n",
 +                (unsigned long long)after, (long long)((after >> 8) & 0xf));
-+        hv_vcpu_get_sys_reg(cpu->accel->fd, (hv_sys_reg_t)0xe088 /*HV_SYS_REG_HCR_EL2, macOS 15+*/, &hcr);
-+        fprintf(stderr, "[VHE-DIAG] HCR_EL2 before TID3=0x%016llx\n",
-+                (unsigned long long)hcr);
-+        hcr |= (1ULL << 18);
-+        ret = hv_vcpu_set_sys_reg(cpu->accel->fd, (hv_sys_reg_t)0xe088 /*HV_SYS_REG_HCR_EL2, macOS 15+*/, hcr);
-+        fprintf(stderr, "[VHE-DIAG] HCR_EL2 set TID3 ret=%d after=0x%016llx\n",
-+                ret, (unsigned long long)hcr);
-+        assert_hvf_ok(ret);
-+        cpu->accel->vhe = g_new0(VHEState, 1);
++        if (hvf_nested_virt_enabled()) {
++            /*
++             * CELL-431 fix: with real EL2 (machine virt,virtualization=on)
++             * the GUEST owns HCR_EL2 and all EL2 state. Writing TID3 here
++             * lands in guest state (clobbered at boot; traps would route to
++             * guest EL2, never the VMM — H2), and the op1==4 shadow
++             * interception below would hijack real EL2 sysreg traps (e.g.
++             * EDK2 runs AT EL2 and uses the CNTHP_* timer), starving the
++             * guest. Pass everything through: no TID3, no shadow state.
++             * The VH=1 ID override above is kept (H1: not guest-visible on
++             * current HVF, but harmless and correct if Apple ever honors it).
++             */
++            fprintf(stderr, "[VHE-DIAG] real EL2 present (virtualization=on): "
++                    "TID3 + shadow-EL2 interception DISABLED (pass-through)\n");
++        } else {
++            hv_vcpu_get_sys_reg(cpu->accel->fd, (hv_sys_reg_t)0xe088 /*HV_SYS_REG_HCR_EL2, macOS 15+*/, &hcr);
++            fprintf(stderr, "[VHE-DIAG] HCR_EL2 before TID3=0x%016llx\n",
++                    (unsigned long long)hcr);
++            hcr |= (1ULL << 18);
++            ret = hv_vcpu_set_sys_reg(cpu->accel->fd, (hv_sys_reg_t)0xe088 /*HV_SYS_REG_HCR_EL2, macOS 15+*/, hcr);
++            fprintf(stderr, "[VHE-DIAG] HCR_EL2 set TID3 ret=%d after=0x%016llx\n",
++                    ret, (unsigned long long)hcr);
++            if (ret != HV_SUCCESS) {
++                /*
++                 * HVF refuses direct HCR_EL2 writes when EL2 is not enabled
++                 * for the VM (hv_vm_config_set_el2_enabled needs M3+ /
++                 * nested-virt entitlement). Non-fatal: the ID_AA64MMFR1_EL1
++                 * override above already succeeded, so HVF serves VH=1 to
++                 * guest MRS reads directly and the TID3 trap path below
++                 * simply never fires.
++                 */
++                fprintf(stderr, "[VHE-DIAG] HCR_EL2.TID3 unavailable "
++                        "(EL2 not enabled for VM); relying on HVF-served "
++                        "ID regs instead of ID-reg trapping\n");
++            }
++        }
++        /*
++         * H4 experiment (NMD-251): is ANY hv_vcpu_set_sys_reg ID-reg override
++         * guest-visible? Force ID_AA64MMFR0_EL1.PARange to the value given in
++         * QEMU_HVF_TEST_PARANGE (e.g. 1 = 36 bits) and let the guest report
++         * it back via KVM's "IPA Size Limit" dmesg line. If the guest shows
++         * the forced value, overrides ARE guest-visible and HVF filters the
++         * VH bit specifically; if not, no override is ever guest-visible.
++         * Inert unless the env var is set.
++         */
++        {
++            const char *pr = getenv("QEMU_HVF_TEST_PARANGE");
++            if (pr) {
++                uint64_t mmfr0 = 0;
++                hv_vcpu_get_sys_reg(cpu->accel->fd,
++                                    HV_SYS_REG_ID_AA64MMFR0_EL1, &mmfr0);
++                fprintf(stderr, "[VHE-DIAG] H4: ID_AA64MMFR0_EL1 "
++                        "before=0x%016llx PARange=%llu\n",
++                        (unsigned long long)mmfr0,
++                        (unsigned long long)(mmfr0 & 0xf));
++                mmfr0 = (mmfr0 & ~0xfULL) | (strtoull(pr, NULL, 0) & 0xf);
++                ret = hv_vcpu_set_sys_reg(cpu->accel->fd,
++                                          HV_SYS_REG_ID_AA64MMFR0_EL1, mmfr0);
++                fprintf(stderr, "[VHE-DIAG] H4: set PARange=%s ret=%d\n",
++                        pr, ret);
++                mmfr0 = 0;
++                hv_vcpu_get_sys_reg(cpu->accel->fd,
++                                    HV_SYS_REG_ID_AA64MMFR0_EL1, &mmfr0);
++                fprintf(stderr, "[VHE-DIAG] H4: ID_AA64MMFR0_EL1 "
++                        "after=0x%016llx PARange=%llu "
++                        "(guest 'IPA Size Limit' line is the verdict)\n",
++                        (unsigned long long)mmfr0,
++                        (unsigned long long)(mmfr0 & 0xf));
++            }
++        }
++        if (!hvf_nested_virt_enabled()) {
++            cpu->accel->vhe = g_new0(VHEState, 1);
++        }
 +    }
 +
      if (!hvf_irqchip_in_kernel()) {
          cpu->accel->wfi_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                               hvf_wfi_timer_cb, cpu);
-@@ -2464,6 +2485,63 @@ static int hvf_handle_exception(CPUState *cpu, hv_vcpu_exit_exception_t *excp)
+@@ -2464,6 +2559,63 @@ static int hvf_handle_exception(CPUState *cpu, hv_vcpu_exit_exception_t *excp)
          uint64_t val = 0;
          int sysreg_ret = 0;
  
@@ -136,7 +200,7 @@ index 4ba7de5..416286a 100644
 +         * crm=4..7) trap here. Return values from HVF API state which has
 +         * our VH=1 modification for ID_AA64MMFR1_EL1.
 +         */
-+        if (hvf_fake_el2_enabled() && isread &&
++        if (hvf_fake_el2_enabled() && cpu->accel->vhe && isread &&
 +            SYSREG_OP0(reg) == 3 && SYSREG_OP1(reg) == 0 &&
 +            SYSREG_CRN(reg) == 0 &&
 +            SYSREG_CRM(reg) >= 4 && SYSREG_CRM(reg) <= 7) {

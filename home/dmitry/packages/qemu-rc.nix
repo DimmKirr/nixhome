@@ -1,4 +1,4 @@
-# QEMU 11.1.0-rc3 override — building from GitLab source archive
+# QEMU 11.1.0 override — building from GitLab source archive
 # with pre-fetched meson wrap subprojects (release tarballs bundle these;
 # GitLab archives don't).
 { pkgs, pkgsEdge }:
@@ -53,14 +53,26 @@ let
   '';
 in
 pkgsEdge.qemu.overrideAttrs (old: {
-  version = "11.1.0-rc3";
+  version = "11.1.0";
   src = fetchurl {
-    url = "https://gitlab.com/qemu-project/qemu/-/archive/v11.1.0-rc3/qemu-v11.1.0-rc3.tar.gz";
-    hash = "sha256-JHXEmURJhJaouBY1JUlQfK8NnqfPP0WyGMczSLNokrY=";
+    url = "https://gitlab.com/qemu-project/qemu/-/archive/v11.1.0/qemu-v11.1.0.tar.gz";
+    hash = "sha256-oTo4obn1p21vhKkDRbwzxHiKU4eCMN9TWZ5lqWW4y4Y=";
   };
   # QEMU 11.1 uses Hypervisor.framework GIC APIs (hv_gic_*) added in macOS 15.
   # Default SDK is 14.4; apple-sdk_26 provides the required headers.
   buildInputs = old.buildInputs ++ lib.optionals stdenv.isDarwin [ pkgsEdge.apple-sdk_26 ];
+  # Tag the custom build so `--version` / QMP query-version unambiguously
+  # identify it vs stock QEMU. The datetimeISO is stamped at BUILD time (when
+  # nix actually compiles this store path), so it always reflects the real
+  # build. Together with the qemu-version.sh join fix in postPatch:
+  #   QEMU emulator version 11.1.0-nixhome-2026-08-13T06-45-12
+  # NOTE: the stamp is deliberately NOT part of the .drv hash — same inputs
+  # still hit the nix cache; it updates whenever a patch/source change forces
+  # a real rebuild. (Suffixing the VERSION file instead would break QEMU's
+  # integer QEMU_VERSION_MICRO macro, hence pkgversion.)
+  preConfigure = (old.preConfigure or "") + ''
+    configureFlagsArray+=("--with-pkgversion=nixhome-$(date -u +%Y-%m-%dT%H-%M-%S)")
+  '';
   patches = (old.patches or [ ]) ++ [
     # NMD-251 Phase 1: JSON-line trace of EC_SYSTEMREGISTERTRAP exits,
     # gated by QEMU_HVF_SYSREG_TRACE env var (inert when unset).
@@ -83,5 +95,8 @@ pkgsEdge.qemu.overrideAttrs (old: {
     cp ${../../scripts/qemu/vhe/vhe_core.c} target/arm/hvf/vhe_core.c
     cp ${../../scripts/qemu/vhe/vhe_core.h} target/arm/hvf/vhe_core.h
     chmod -R u+w target/arm/hvf
+    # Version string as "11.1.0-<pkgversion>" instead of "11.1.0 (<pkgversion>)"
+    substituteInPlace scripts/qemu-version.sh \
+      --replace-fail 'fullversion="$version ($pkgversion)"' 'fullversion="$version-$pkgversion"'
   '';
 })

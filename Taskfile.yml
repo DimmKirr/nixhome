@@ -18,36 +18,43 @@ vars:
 tasks:
   switch:
     desc: Activate the nix-darwin configuration offline (no fresh nix cache)
+    silent: true
     cmds:
       - sudo darwin-rebuild switch --flake . --offline
       - tmux source-file ~/.config/tmux/tmux.conf
 
   apply:
     desc: Build and activate with fresh nix cache (refresh flake inputs/substitutes)
+    silent: true
     cmds:
       - sudo darwin-rebuild switch --flake . --refresh
       - tmux source-file ~/.config/tmux/tmux.conf
+      - date -u +%Y-%m-%dT%H:%M:%SZ
 
   prune:
     desc: Prune all unused Nix store derivations
+    silent: true
     cmds:
       - nix-collect-garbage -d
       - nix store optimise
 
   colima:ssh:
     desc: SSH into the colima VM (home directory)
+    silent: true
     dir: '~'
     cmds:
       - colima ssh
 
   colima:restart:
     desc: Restart colima VM (picks up new CPU/memory/disk settings)
+    silent: true
     cmds:
       - colima stop
       - colima start --save-config=false
 
   debug:colima:
     desc: Debug colima VM state, nested virtualization, and /dev/kvm availability
+    silent: true
     cmds:
       - |
         set -eu
@@ -196,6 +203,7 @@ tasks:
 
   debug:theme:
     desc: Dump full tmux theme/status state (run from inside tmux)
+    silent: true
     cmds:
       - |
         set -eu
@@ -784,6 +792,7 @@ tasks:
 
   debug:theme-diff:
     desc: Diff the two most recent theme dumps (e.g. dracula vs current)
+    silent: true
     cmds:
       - |
         set -eu
@@ -813,12 +822,14 @@ tasks:
 
   debug:theme-clean:
     desc: Wipe all theme dumps
+    silent: true
     cmds:
       - rm -rf {{.DUMP_ROOT}}
       - echo "wiped {{.DUMP_ROOT}}"
 
   debug:tmuxp:
     desc: 'Dump full tmux + tmuxp state for the current tmux session'
+    silent: true
     cmds:
       - |
         set -eu
@@ -1027,25 +1038,274 @@ tasks:
   # NOTE: the QEMU build reads the flake's git tree — `git add` any new/edited
   # files first or the build won't see them.
   debug:qemu:el2:
-    desc: 'macOS: boot Alpine Linux ARM64 with patched QEMU+HVF'
+    desc: 'macOS: FULL fake-el2 debug — unit tests, compile-check, binary probe, dual guest boot, hypothesis verdicts (one timestamped log)'
     silent: true
+    vars:
+      EL2_TS:
+        sh: date -u +%Y-%m-%dT%H-%M-%S
+      # One directory per run: .context/debug/<datetimeISO>/ holds the main
+      # log AND all per-run artifacts (serials, sysreg traces, qemu stderr,
+      # EFI varstore). Reusable downloads stay in .context/debug/qemu/cache.
+      EL2_RUN_DIR: '{{.ROOT_DIR}}/.context/debug/{{.EL2_TS}}'
+      EL2_RUN_LOG: '{{.EL2_RUN_DIR}}/qemu-el2.log'
     cmds:
       - |
         set -eu
-        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        mkdir -p '{{.EL2_RUN_DIR}}'
         {
           echo "=== debug:qemu:el2 $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
           echo "host:  $(uname -srm)"
+          echo "chip:  $(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo N/A)"
           echo "macOS: $(sw_vers -productVersion 2>/dev/null || echo N/A)"
           echo "nix:   $(nix --version 2>/dev/null || echo N/A)"
-        } > '{{.QEMU_EL2_LOG}}'
+          echo "run:   {{.EL2_RUN_DIR}}"
+        } | tee '{{.EL2_RUN_LOG}}'
+      # 1. standalone VHE core: compile + 16 unit tests (Apple clang, no QEMU deps)
+      - task: debug:qemu:el2:core
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}' }
+      # 2. replay harness: compile + trace-replay tests
+      - task: debug:qemu:el2:replay
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}' }
+      # 3. surgical compile-check (hvf.c + vhe_core.c) + installed-binary probe
+      #    (version, patch markers, property recognition, dual-mode runtime — H3)
+      - task: debug:qemu:el2:qemu
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}' }
+      # 4a. guest boot WITH real EL2 (H2: guest owns EL2, TID3 traps bypass VMM)
       - task: debug:qemu:el2:boot
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}', QEMU_EL2_ARTIFACTS: '{{.EL2_RUN_DIR}}', MACHINE: 'virt,virtualization=on' }
+      # 4b. guest boot at EL1, plain virt (H1: is the VH=1 ID-reg override
+      #     actually guest-visible when nothing runs above the guest kernel?)
+      - task: debug:qemu:el2:boot
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}', QEMU_EL2_ARTIFACTS: '{{.EL2_RUN_DIR}}', MACHINE: 'virt' }
+      # 4c. EDK2 firmware A/B under virtualization=on (H7 / CELL-431:
+      #     shadow interception must not starve firmware running at EL2)
+      - task: debug:qemu:el2:uefi
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}', QEMU_EL2_ARTIFACTS: '{{.EL2_RUN_DIR}}' }
+      # 4f. H10: bare-metal EL2 VHE probe — the definitive confound-free test
+      #     of whether Apple's guest-EL2 has VHE behavior (E2H sticks + VHE regs
+      #     work). Supersedes the invalid H8 (Linux refused the override + PARange
+      #     confound). TCG control must pass.
+      - task: debug:qemu:el2:baremetal
+        vars: { QEMU_EL2_LOG: '{{.EL2_RUN_LOG}}', QEMU_EL2_ARTIFACTS: '{{.EL2_RUN_DIR}}' }
+      # NOTE: the Linux "vhprobe" boots (id_aa64mmfr1.vh=1) were REMOVED — the
+      # kernel refuses to raise VH ("ignoring override to 1") and the resulting
+      # crash is uninterpretable (murky, happens with and without PARange). The
+      # bare-metal H10 probe above is the clean, confound-free replacement, with
+      # its own fast TCG control (no need for a slow ~5min Linux TCG boot).
+      # 5. [sdk] H5: does the macOS SDK expose any API that could make ID-reg
+      #    overrides guest-visible (vcpu config feature regs, FGT controls)?
       - |
+        set -u
+        LOG='{{.EL2_RUN_LOG}}'
+        say() { echo "$@" | tee -a "$LOG"; }
+        say ""
+        say "### [sdk] Hypervisor.framework header scan (H5)"
+        # Scan ALL apple-sdk store paths and prefer the NEWEST one that knows
+        # about nested virt (hv_vm_config_set_el2_enabled, macOS 15+). The
+        # nixpkgs default apple-sdk is 14.4 (pre-nested-virt) — scanning that
+        # one tells us nothing about the current API surface.
+        HDRS=""; BEST=""
+        for S in $(ls -d /nix/store/*apple-sdk* 2>/dev/null); do
+          D=$(find "$S" -path '*Hypervisor.framework*Headers' -type d 2>/dev/null | head -1)
+          [ -z "$D" ] && continue
+          if grep -rq 'hv_vm_config_set_el2_enabled' "$D" 2>/dev/null; then
+            BEST="$D"
+          elif [ -z "$HDRS" ]; then
+            HDRS="$D"
+          fi
+        done
+        if [ -z "$BEST" ] && command -v xcrun >/dev/null 2>&1; then
+          D="$(xcrun --show-sdk-path 2>/dev/null)/System/Library/Frameworks/Hypervisor.framework/Versions/A/Headers"
+          [ -d "$D" ] && grep -rq 'hv_vm_config_set_el2_enabled' "$D" 2>/dev/null && BEST="$D"
+        fi
+        [ -n "$BEST" ] && HDRS="$BEST"
+        if [ -z "$HDRS" ]; then
+          say "[sdk] H5 UNTESTED — no Hypervisor.framework headers found (nix store or xcrun)"
+        else
+          say "[sdk] headers: $HDRS"
+          if [ -n "$BEST" ]; then
+            say "[sdk] (nested-virt-aware SDK: has hv_vm_config_set_el2_enabled)"
+          else
+            say "[sdk] WARNING: only a pre-nested-virt SDK found (14.x) — symbols below are INCOMPLETE for H5; rerun after apple-sdk_26 is in the store (any el2:qemu compile pulls it)"
+          fi
+          say "[sdk] SETTER APIs (the H5 question — can anything be configured pre-create?):"
+          grep -rhoE 'hv_(vcpu|vm)_config_set_[a-z0-9_]*' "$HDRS" 2>/dev/null \
+            | sort -u | sed 's/^/[sdk]   /' | tee -a "$LOG"
+          say "[sdk] all config/feature/fgt/el2 APIs:"
+          grep -rhoE 'hv_(vcpu|vm)_config[a-z0-9_]*|hv_[a-z0-9_]*(feature|fgt|el2|gic)[a-z0-9_]*' "$HDRS" 2>/dev/null \
+            | sort -u | sed 's/^/[sdk]   /' | tee -a "$LOG"
+          say "[sdk] ID-reg related symbols:"
+          grep -rhoE '[A-Za-z_]*ID_AA64[A-Z0-9_]*' "$HDRS" 2>/dev/null \
+            | sort -u | head -24 | sed 's/^/[sdk]   /' | tee -a "$LOG"
+          # H9: is there ANY control to route guest EL2 accesses to the VMM
+          # (the prerequisite for software virtual-EL2 / trap-and-emulate VHE)?
+          # Search the FULL header text, not just symbol names, for nested/NV/
+          # trap/vtcr/hcr/exception-routing vocabulary. Absence here is the
+          # actual proof that the software-vEL2 path is closed — not folklore.
+          say "[sdk] H9 — nested/NV/trap-routing vocabulary in headers (prerequisite for software vEL2):"
+          grep -rhioE 'nested[a-z_]*|[a-z_]*_nv[0-9a-z_]*|trap[a-z_]*|hcr[a-z0-9_]*|vtcr[a-z0-9_]*|vttbr[a-z0-9_]*|exception_route[a-z_]*|hv_vcpu_set_trap[a-z_]*|EC_[A-Z0-9_]*|deliver[a-z_]*exception' "$HDRS" 2>/dev/null \
+            | sort -u | sed 's/^/[sdk]   /' | tee -a "$LOG" || say "[sdk]   (none)"
+          say "[sdk] H9 — every hv_vcpu_* API (look for a trap/EL2-config setter we haven't used):"
+          grep -rhoE 'hv_vcpu_[a-z0-9_]*' "$HDRS" 2>/dev/null \
+            | sort -u | sed 's/^/[sdk]   /' | tee -a "$LOG"
+        fi
+      # 6. hypothesis verdicts — parse everything this run produced
+      - |
+        set -u
+        LOG='{{.EL2_RUN_LOG}}'
+        ART='{{.EL2_RUN_DIR}}'
+        say() { echo "$@" | tee -a "$LOG"; }
+        S_EL1="$ART/serial-virt.log"
+        S_EL2="$ART/serial-virt-virtualization-on.log"
+        say ""
+        say "### [hypotheses] verdicts from this run"
+        # H1 — is the hv_vcpu_set_sys_reg VH=1 override guest-visible?
+        #      Decisive: plain-virt guest runs at EL1 with no TID3 trapping;
+        #      if its dmesg lacks VHE, the override is API-visible only.
+        if [ -f "$S_EL1" ]; then
+          if grep -q 'Virtualization Host Extensions' "$S_EL1"; then
+            say "[hypotheses] H1 REFUTED   — EL1 guest sees FEAT_VHE: the ID-reg override IS guest-visible (fake-el2 core premise works)"
+          else
+            say "[hypotheses] H1 CONFIRMED — EL1 guest does NOT see FEAT_VHE despite HVF accepting VH=1 (guest MRS served from hw ID regs)"
+          fi
+        else
+          say "[hypotheses] H1 UNTESTED  — no $S_EL1 (plain-virt boot did not produce serial output)"
+        fi
+        # H2 — with virtualization=on the GUEST owns EL2: our TID3 write lands
+        #      in guest state and traps route to guest EL2, never the VMM.
+        if [ -f "$S_EL2" ]; then
+          EL2_START=$(grep -c 'started at EL2' "$S_EL2" || true)
+          TID3_OK=$(grep -c 'set TID3 ret=0' "$LOG" || true)
+          TID3_TRAPS=$(grep -c 'TID3 trap:' "$LOG" || true)
+          if grep -q 'real EL2 present (virtualization=on)' "$LOG" && [ "${EL2_START:-0}" -gt 0 ]; then
+            say "[hypotheses] H2 RESOLVED  — v4 pass-through active: TID3/shadow no longer attempted with real EL2 (was CONFIRMED pre-v4; fix in place)"
+          elif [ "${EL2_START:-0}" -gt 0 ] && [ "${TID3_OK:-0}" -gt 0 ] && [ "${TID3_TRAPS:-0}" -eq 0 ]; then
+            say "[hypotheses] H2 CONFIRMED — guest started at EL2, TID3 write ok, 0 ID-reg traps reached the VMM (pre-v4 binary)"
+          elif [ "${TID3_TRAPS:-0}" -gt 0 ]; then
+            say "[hypotheses] H2 REFUTED   — $TID3_TRAPS TID3 traps reached the VMM"
+          else
+            say "[hypotheses] H2 INCONCLUSIVE — el2_start=$EL2_START tid3_ok=$TID3_OK traps=$TID3_TRAPS"
+          fi
+        else
+          say "[hypotheses] H2 UNTESTED  — no $S_EL2"
+        fi
+        # H3 — HCR_EL2 is writable ONLY when the VM has EL2 enabled.
+        #      v4 semantics: with real EL2 the HCR write is deliberately
+        #      SKIPPED (pass-through), so 'TID3 writable' no longer appears;
+        #      the pass-through diag line is the v4 equivalent.
+        P_VIRT=$(grep 'mode(virt):' "$LOG" | tail -1 || true)
+        P_VEL2=$(grep 'mode(virt,virtualization=on):' "$LOG" | tail -1 || true)
+        if echo "$P_VIRT" | grep -q 'TID3 fallback\|HV_UNSUPPORTED'; then
+          if grep -q 'real EL2 present (virtualization=on)' "$LOG"; then
+            say "[hypotheses] H3 CONFIRMED (v4) — plain virt: HCR_EL2 HV_UNSUPPORTED (fallback); real EL2: write skipped by pass-through gating"
+          elif echo "$P_VEL2" | grep -q 'TID3 writable'; then
+            say "[hypotheses] H3 CONFIRMED — HCR_EL2: HV_UNSUPPORTED on plain virt, writable with virtualization=on (pre-v4 binary)"
+          else
+            say "[hypotheses] H3 INCONCLUSIVE — probe said: '$P_VIRT' / '$P_VEL2'"
+          fi
+        else
+          say "[hypotheses] H3 INCONCLUSIVE — probe said: '$P_VIRT' / '$P_VEL2'"
+        fi
+        # H4 — are ID-reg overrides EVER guest-visible? The patch forces
+        #      ID_AA64MMFR0.PARange=1 (36 bits) when QEMU_HVF_TEST_PARANGE=1
+        #      (set by the boot task). The EL2 guest's KVM init reads PARange
+        #      and prints 'IPA Size Limit: N bits' — that line is the verdict.
+        if [ -f "$S_EL2" ] && grep -q 'H4: set PARange' "$LOG"; then
+          IPA_LINE=$(grep -o 'IPA Size Limit: [0-9]* bits' "$S_EL2" | head -1 || true)
+          if echo "$IPA_LINE" | grep -q '36 bits'; then
+            say "[hypotheses] H4 CONFIRMED — PARange override IS guest-visible ($IPA_LINE): HVF honors narrowing overrides but filters the VH bit specifically"
+          elif [ -n "$IPA_LINE" ]; then
+            say "[hypotheses] H4 REFUTED   — PARange override NOT guest-visible ($IPA_LINE): NO ID-reg override reaches guest MRS (supports H6: OS-level dead end)"
+          else
+            say "[hypotheses] H4 INCONCLUSIVE — no 'IPA Size Limit' line in EL2 guest dmesg"
+          fi
+        else
+          say "[hypotheses] H4 UNTESTED  — PARange experiment did not run (rebuild QEMU: patch adds QEMU_HVF_TEST_PARANGE)"
+        fi
+        # H5 — is there an SDK API QEMU doesn't use that could expose VH?
+        #      (informational: read the [sdk] section above for candidates)
+        SDK_HITS=$(grep -c '^\[sdk\]   ' "$LOG" 2>/dev/null || true)
+        say "[hypotheses] H5: $SDK_HITS candidate SDK symbols captured in [sdk] section — review for config-time feature-reg/FGT setters"
+        # H6 — implied: if H4 REFUTED and H5 yields no setter, VH faking is
+        #      impossible via current HVF; document as OS limitation.
+        # (H8/H8b removed: the Linux id_aa64mmfr1.vh=1 probe is uninterpretable
+        #  — the kernel refuses to raise VH and the crash is murky. The
+        #  bare-metal H10 probe below is the clean replacement.)
+        # H10 — DEFINITIVE VHE test (bare-metal poke-and-see). Does Apple's
+        #       guest-EL2 have VHE BEHAVIOR, or only mask the ID bit? Read the
+        #       HVF probe: E2H stick + VHE-register round-trips vs UNDEF (EXC).
+        B_HVF="$ART/baremetal-hvf-el2.log"
+        B_TCG="$ART/baremetal-tcg-control.log"
+        SENT='0x00005678abcd1234'   # write sentinel the WR macro stores
+        tcg_ok=no
+        if [ -f "$B_TCG" ] && grep -q 'E2H_bit=1' "$B_TCG" \
+           && grep -q "TTBR1_EL2_wr(VHE)=$SENT" "$B_TCG"; then tcg_ok=yes; fi
+        if [ "$tcg_ok" = yes ]; then
+          say "[hypotheses] H10 control OK — TCG bare-metal: E2H_bit=1 + TTBR1_EL2 round-trips (probe valid)"
+        else
+          say "[hypotheses] H10 control FAILED — TCG bare-metal did not show VHE; HVF verdict suspect (read $B_TCG)"
+        fi
+        if [ ! -f "$B_HVF" ]; then
+          say "[hypotheses] H10 UNTESTED — no HVF bare-metal probe output"
+        else
+          E2H_OK=no; TTBR_OK=no; TTBR_EXC=no
+          grep -q 'E2H_bit=1' "$B_HVF" && E2H_OK=yes
+          grep -q "TTBR1_EL2_wr(VHE)=$SENT" "$B_HVF" && TTBR_OK=yes
+          grep -q 'EXC tag=0x0*40' "$B_HVF" && TTBR_EXC=yes    # tag 40 = TTBR1_EL2
+          say "[hypotheses] H10 HVF: E2H_stuck=$E2H_OK TTBR1_roundtrip=$TTBR_OK TTBR1_UNDEF=$TTBR_EXC"
+          if [ "$E2H_OK" = yes ] && [ "$TTBR_OK" = yes ]; then
+            say "[hypotheses] H10 *** SURPRISE — VHE BEHAVIOR EXISTS on Apple guest-EL2 (E2H sticks + VHE regs work); only the ID BIT is masked. Faking VH for Windows is VIABLE — REOPEN NMD-251. ***"
+          elif [ "$TTBR_EXC" = yes ] || [ "$E2H_OK" = no ]; then
+            say "[hypotheses] H10 CONFIRMED (no VHE) — Apple guest-EL2 lacks VHE behavior (E2H didn't stick and/or VHE regs UNDEF): faking the bit cannot work"
+          else
+            say "[hypotheses] H10 INCONCLUSIVE — mixed signals; read $B_HVF"
+          fi
+        fi
+        # H9 — software virtual-EL2 feasibility: is there an HVF API to route
+        #      guest EL2 sysreg accesses to the VMM? (the prerequisite for
+        #      trap-and-emulate VHE). Distinguish GENERAL EL2 trapping from the
+        #      debug-only trap setters that do exist.
+        if grep -qE '^\[sdk\]   hv_vcpu_set_trap_(sysreg|el2|exception)[^_]' "$LOG" 2>/dev/null; then
+          say "[hypotheses] H9 LEAD — a GENERAL EL2/sysreg trap-routing API is present: INVESTIGATE software vEL2 (see [sdk] H9)"
+        elif grep -qE '^\[sdk\]   hv_vcpu_set_trap_debug' "$LOG" 2>/dev/null; then
+          say "[hypotheses] H9 CLOSED — only DEBUG-scoped trap setters exist (hv_vcpu_set_trap_debug_*); no general EL2-access routing => software vEL2 (trap-and-emulate VHE) remains architecturally impossible on HVF"
+        else
+          say "[hypotheses] H9 CLOSED — no trap-routing control in HVF headers at all; software vEL2 impossible independent of the VH bit"
+        fi
+        # H7 — CELL-431: with real EL2, the op1==4 shadow interception starved
+        #      EDK2 (firmware runs AT EL2, needs its CNTHP timer). After the
+        #      v4 pass-through gating, fake-el2=on must reach BDS/Shell just
+        #      like the fake-el2=off control.
+        U_ON=$(grep '\[uefi\] fake-el2=on:' "$LOG" | grep -v 'sysreg traps' | tail -1 || true)
+        U_OFF=$(grep '\[uefi\] fake-el2=off:' "$LOG" | grep -v 'sysreg traps' | tail -1 || true)
+        T_ON=$(grep '\[uefi\] fake-el2=on: sysreg traps' "$LOG" | tail -1 || true)
+        PARITY=$(grep '\[uefi\] PARITY:' "$LOG" | tail -1 || true)
+        # Order matters: judge the CONTROL first — if even fake-el2=off fails,
+        # the repro can't blame the patch; parity is then the deciding signal.
+        if echo "$U_OFF" | grep -q 'STALL\|NO OUTPUT'; then
+          if echo "$PARITY" | grep -q 'byte-identical'; then
+            say "[hypotheses] H7 PASS-THROUGH OK — control also imperfect locally, but fake-el2=on is byte-identical to off (gating works; definitive test = devcell WinPE after darwin-rebuild switch). $T_ON"
+          else
+            say "[hypotheses] H7 INVALID CONTROL — even fake-el2=off fails and outputs differ: '$U_OFF' vs '$U_ON'"
+          fi
+        elif echo "$U_ON" | grep -q PROGRESS; then
+          say "[hypotheses] H7 FIXED — EDK2 reaches BDS with fake-el2=on (pass-through gating works; update CELL-431). $T_ON"
+        elif echo "$U_ON" | grep -q 'STALL\|NO OUTPUT'; then
+          say "[hypotheses] H7 STILL BROKEN — fake-el2=on: '$U_ON' vs healthy control: '$U_OFF'. $T_ON"
+        else
+          say "[hypotheses] H7 UNTESTED — uefi step produced no verdict lines"
+        fi
+      # 6. summary + keep the canonical fixed-path copy for tools/agents
+      - |
+        LOG='{{.EL2_RUN_LOG}}'
         echo
-        echo "── el2.log summary ──────────────────────────────────────────"
-        grep -E '^\[(boot)\].*VERDICT\|^\[(boot)\].*exit\|^\[(boot)\].*OK\|^\[(boot)\].*FAIL' '{{.QEMU_EL2_LOG}}' || true
+        echo "── summary ──────────────────────────────────────────────────"
+        grep -E 'VERDICT|hypotheses\] H[0-9]|compiled OK|tests exit|compile exit|exit=' "$LOG" | grep -v '^\[probe\]   ' || true
         echo
-        echo "Full log: {{.QEMU_EL2_LOG}}"
+        echo "Run dir:  {{.EL2_RUN_DIR}}  (main log: qemu-el2.log + serials/traces/stderr)"
+        mkdir -p "$(dirname '{{.QEMU_EL2_LOG}}')"
+        cp "$LOG" '{{.QEMU_EL2_LOG}}'
+        echo "Canonical copy: {{.QEMU_EL2_LOG}}"
 
   debug:qemu:el2:core:
     desc: 'macOS: standalone compile + unit-test of vhe_core.c (Apple clang)'
@@ -1142,6 +1402,112 @@ tasks:
           echo "[qemu] compile-check exit=0" >> "$LOG"
           echo "[qemu] hvf.c + vhe_core.c compiled OK" | tee -a "$LOG"
         fi
+      # probe the INSTALLED qemu-system-aarch64: prove it is the patched
+      # fake-el2 build (identity, version, flag recognised, runtime mode).
+      # This is the counter-evidence when a tool/agent claims "the binary has
+      # no patch" — it may be looking at stock pkgs.qemu (devcell vm.nix).
+      #
+      # Hypotheses this probe instruments (see el2.log analysis):
+      #   H1: HVF serves guest MRS of ID regs from hardware, ignoring the
+      #       hv_vcpu_set_sys_reg override (boot task proves/refutes via dmesg).
+      #   H2: under virtualization=on the GUEST owns EL2, so TID3-in-HCR_EL2
+      #       traps to the guest, not the VMM (trap_count stays 0).
+      #   H3: HCR_EL2 is writable ONLY when the VM has EL2 enabled — the
+      #       dual-mode runtime probe below shows ret=0 vs HV_UNSUPPORTED.
+      - |
+        set -u
+        LOG='{{.QEMU_EL2_LOG}}'
+        say() { echo "$@" | tee -a "$LOG"; }
+        say ""
+        say "### [probe] installed qemu-system-aarch64 — fake-el2 availability"
+        say "[probe] host:    $(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo '?') | macOS $(sw_vers -productVersion 2>/dev/null || echo '?') | $(uname -m)"
+        Q="$(command -v qemu-system-aarch64 || true)"
+        if [ -z "$Q" ]; then
+          say "[probe] VERDICT: FAIL — qemu-system-aarch64 not on PATH"; exit 1
+        fi
+        say "[probe] binary:  $Q"
+        say "[probe] store:   $(readlink -f "$Q" 2>/dev/null || echo '?')"
+        say "[probe] sha256:  $(shasum -a 256 "$Q" 2>/dev/null | cut -d' ' -f1)"
+        say ""
+        say "[probe] \$ qemu-system-aarch64 --version"
+        VER="$("$Q" --version | head -1)"
+        say "[probe]   $VER"
+        case "$VER" in
+          *nixhome*) say "[probe]   => custom nixhome build (pkgversion tag embedded — unambiguous)";;
+          *11.0.93*) say "[probe]   => 11.1.0-rc3 (custom qemu-rc.nix build; rc reports as 11.0.9x)";;
+          *11.1.0*)  say "[probe]   => 11.1.0 final, UNTAGGED (custom build predating the pkgversion tag, or stock — check patch markers below)";;
+          *)         say "[probe]   => WARNING: unexpected version — possibly stock nixpkgs qemu";;
+        esac
+        # static: count patch markers embedded in the binary. Stock QEMU has
+        # zero occurrences of either string — non-zero counts are only possible
+        # if hvf-vhe-emulation.patch was compiled in.
+        say ""
+        say "[probe] \$ grep -ac 'fake-el2' \$(command -v qemu-system-aarch64)   # patch marker count"
+        N_FLAG=$(grep -ac 'fake-el2' "$Q" 2>/dev/null || echo 0)
+        N_DIAG=$(grep -ac 'VHE-DIAG' "$Q" 2>/dev/null || echo 0)
+        say "[probe]   fake-el2 x$N_FLAG, VHE-DIAG x$N_DIAG"
+        if [ "$N_FLAG" -eq 0 ]; then
+          say "[probe] VERDICT: FAIL — binary contains NO 'fake-el2' marker (stock build)"; exit 1
+        fi
+        # NOTE for humans and LLMs: 'qemu-system-aarch64 --help | grep fake'
+        # prints NOTHING even on the patched build — accel properties are QOM
+        # properties, never listed in --help (same as e.g. hvf's
+        # kernel-irqchip). Absence from --help proves nothing. The
+        # authoritative check is feeding the property an invalid value:
+        # a patched build rejects the VALUE ("expects 'on' or 'off'");
+        # a stock build rejects the PROPERTY ("Property ... not found").
+        # Immediate clean exit either way — no VM is started.
+        say ""
+        say "[probe] note: '--help | grep fake' is empty BY DESIGN — accel properties are not in --help"
+        say "[probe] \$ qemu-system-aarch64 -machine virt -accel hvf,fake-el2=banana   # property-recognition test"
+        PROP_ERR="$("$Q" -machine virt -accel hvf,fake-el2=banana 2>&1 || true)"
+        say "[probe]   $PROP_ERR"
+        if echo "$PROP_ERR" | grep -qi "expects\|boolean\|'on' or 'off'"; then
+          say "[probe]   => rejects the VALUE, not the property: fake-el2 EXISTS in this binary"
+        elif echo "$PROP_ERR" | grep -qi "not found\|invalid parameter"; then
+          say "[probe] VERDICT: FAIL — accel does not recognise fake-el2 (stock behaviour)"; exit 1
+        else
+          say "[probe]   => WARNING: ambiguous output — property not conclusively validated"
+        fi
+        # runtime: start paused (-S) in BOTH machine modes, capture VHE-DIAG.
+        # H3: '-machine virt' => HCR_EL2 write fails HV_UNSUPPORTED (TID3
+        #     fallback path); '-machine virt,virtualization=on' => VM has real
+        #     EL2, HCR_EL2 write succeeds (ret=0).
+        # Foreground `timeout` (same mechanism the boot task uses) — a
+        # backgrounded qemu + kill-by-PID is unreliable under Task's shell
+        # and an orphaned qemu holds the output pipe open, hanging the task.
+        OK_COUNT=0
+        for M in virt virt,virtualization=on; do
+          say ""
+          say "[probe] \$ timeout 8 qemu-system-aarch64 -machine $M -cpu host -accel hvf,fake-el2=on -S"
+          T="$(mktemp)"
+          timeout 8 "$Q" -machine "$M" -cpu host -accel hvf,fake-el2=on \
+               -display none -serial none -monitor none -S \
+               >/dev/null 2>"$T" || true
+          grep -a "VHE-DIAG" "$T" | sed 's/^/[probe]   /' | tee -a "$LOG" || say "[probe]   (no VHE-DIAG lines)"
+          if grep -aq "fake_el2_enabled=1" "$T"; then
+            OK_COUNT=$((OK_COUNT + 1))
+            RES="fake-el2 ACTIVE"
+            grep -aq "after=.*VH=1" "$T" && RES="$RES, VH=1 override accepted by HVF"
+            if grep -aq "set TID3 ret=0" "$T"; then
+              RES="$RES, HCR_EL2.TID3 writable (VM has EL2) [H3]"
+            elif grep -aq "TID3 unavailable" "$T"; then
+              RES="$RES, TID3 fallback (HVF-served ID regs; EL2 not enabled) [H3]"
+            elif grep -aq "set TID3 ret=-" "$T"; then
+              RES="$RES, HCR_EL2 write HV_UNSUPPORTED (rc3 binary aborts here) [H3]"
+            fi
+            say "[probe] mode($M): $RES"
+          else
+            say "[probe] mode($M): FAIL — fake-el2=on did not activate"
+          fi
+          rm -f "$T"
+        done
+        say ""
+        if [ "$OK_COUNT" -ge 1 ]; then
+          say "[probe] VERDICT: OK — patched QEMU confirmed: fake-el2 present and active in $OK_COUNT/2 machine modes ($VER)"
+        else
+          say "[probe] VERDICT: FAIL — fake-el2=on did not activate in any machine mode"; exit 1
+        fi
 
   debug:qemu:el2:fullbuild:
     desc: 'macOS: full QEMU build with VHE patches — produces qemu-system-aarch64'
@@ -1192,20 +1558,40 @@ tasks:
         fi
 
   debug:qemu:el2:boot:
-    desc: 'macOS: boot Alpine Linux ARM64 with HVF — smoke-test the built binary'
+    desc: 'macOS: boot Alpine Linux ARM64 — smoke-test the built binary (vars: MACHINE, ACCEL, CPU, EXTRA_CMDLINE, VARIANT, BOOT_TIMEOUT, BOOT_WAIT)'
     silent: true
+    vars:
+      MACHINE: '{{.MACHINE | default "virt,virtualization=on"}}'
+      ACCEL: '{{.ACCEL | default "hvf,fake-el2=on"}}'
+      CPU: '{{.CPU | default "host"}}'
+      EXTRA_CMDLINE: '{{.EXTRA_CMDLINE | default ""}}'
+      VARIANT: '{{.VARIANT | default ""}}'
+      BOOT_TIMEOUT: '{{.BOOT_TIMEOUT | default "60"}}'
+      BOOT_WAIT: '{{.BOOT_WAIT | default "20"}}'
+      TEST_PARANGE: '{{.TEST_PARANGE | default "1"}}'
     cmds:
       - |
         set -u
         LOG='{{.QEMU_EL2_LOG}}'
         trap 'echo "[boot] script exited unexpectedly at line $LINENO (exit=$?)" >> "$LOG" 2>/dev/null || true' EXIT
         CACHE="{{.ROOT_DIR}}/.context/debug/qemu/cache"
+        # Per-run artifacts go to the run dir when invoked via debug:qemu:el2;
+        # standalone invocations fall back to the shared cache dir.
+        ART='{{.QEMU_EL2_ARTIFACTS}}'
+        [ -z "$ART" ] && ART="$CACHE"
+        mkdir -p "$ART"
         ALPINE_VER="3.21.3"
         ALPINE_MINOR="3.21"
-        SERIAL_OUT="$CACHE/serial.log"
+        M='{{.MACHINE}}'
+        M_TAG=$(echo "$M" | tr ',=' '--')
+        V='{{.VARIANT}}'
+        [ -n "$V" ] && M_TAG="$M_TAG-$V"
+        SERIAL_OUT="$ART/serial-$M_TAG.log"
+        QERR="$ART/qemu-stderr-$M_TAG.log"
         {
           echo
-          echo "### [boot] Alpine Linux ARM64 — HVF + fake-el2=on (VHE emulation)"
+          echo "### [boot] Alpine Linux ARM64 — accel={{.ACCEL}} cpu={{.CPU}} machine=$M variant=${V:-default}"
+          [ -n '{{.EXTRA_CMDLINE}}' ] && echo "extra cmdline: {{.EXTRA_CMDLINE}}"
           echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         } >> "$LOG"
 
@@ -1235,7 +1621,6 @@ tasks:
         mkdir -p "$CACHE"
         KERNEL="$CACHE/vmlinuz-virt-${ALPINE_VER}"
         INITRD="$CACHE/initramfs-virt-${ALPINE_VER}"
-        ISO="$CACHE/alpine-virt-${ALPINE_VER}-aarch64.iso"
         BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_MINOR}/releases/aarch64"
         for asset in netboot/vmlinuz-virt netboot/initramfs-virt; do
           FNAME=$(basename "$asset")
@@ -1246,56 +1631,75 @@ tasks:
             mv "$LOCAL.tmp" "$LOCAL"
           fi
         done
-        if [ ! -f "$ISO" ]; then
-          echo "[boot] downloading ISO" | tee -a "$LOG"
-          curl -fSL -o "$ISO.tmp" "$BASE_URL/alpine-virt-${ALPINE_VER}-aarch64.iso" >> "$LOG" 2>&1
-          mv "$ISO.tmp" "$ISO"
-        fi
         echo "[boot] kernel:  $KERNEL ($(du -h "$KERNEL" | cut -f1))" >> "$LOG"
         echo "[boot] initrd:  $INITRD ($(du -h "$INITRD" | cut -f1))" >> "$LOG"
-        echo "[boot] iso:     $ISO ($(du -h "$ISO" | cut -f1))" >> "$LOG"
 
-        # boot with HVF + fake-el2, direct kernel (bypasses UEFI), ISO as root media
+        # boot with HVF + fake-el2, direct kernel (bypasses UEFI).
         # loglevel=7: capture all kernel messages including CPU feature detection (H1)
-        # -cdrom: provide boot media so initramfs can mount rootfs (H2)
+        # init=/bin/sh: deterministic root shell on the serial console — no
+        #   Alpine init, no login. Lets us TYPE verification commands into the
+        #   guest via stdin and read the answers back on stdout (SERIAL_OUT).
         # QEMU_HVF_SYSREG_TRACE: capture sysreg traps to check if ID regs trap (H3)
-        SYSREG_TRACE="$CACHE/sysreg-trace.jsonl"
-        echo "[boot] booting Alpine (timeout 45s)..." | tee -a "$LOG"
-        rm -f "$SERIAL_OUT" "$SYSREG_TRACE"
+        SYSREG_TRACE="$ART/sysreg-trace-$M_TAG.jsonl"
+        echo "[boot] booting Alpine (machine=$M, accel={{.ACCEL}}, timeout {{.BOOT_TIMEOUT}}s) + in-guest CPU checks..." | tee -a "$LOG"
+        rm -f "$SERIAL_OUT" "$SYSREG_TRACE" "$QERR"
         QEMU_RC=0
+        {
+          sleep {{.BOOT_WAIT}}
+          printf 'mount -t proc proc /proc 2>/dev/null; mount -t sysfs sysfs /sys 2>/dev/null\n'
+          printf 'echo GUEST-MARKER-BEGIN\n'
+          printf 'echo "--- uname -a"; uname -a\n'
+          printf 'echo "--- /proc/cpuinfo"; cat /proc/cpuinfo\n'
+          printf 'echo "--- dmesg cpu/virt lines"; dmesg | grep -iE "CPU features|Virtualization Host|started at EL|Hyp .*mode|kvm|override|vhe|e2h"\n'
+          printf 'echo "--- kernel cmdline"; cat /proc/cmdline 2>/dev/null || echo n/a\n'
+          printf 'echo "--- midr_el1"; cat /sys/devices/system/cpu/cpu0/regs/identification/midr_el1 2>/dev/null || echo n/a\n'
+          printf 'echo GUEST-MARKER-END\n'
+          sleep 4
+          printf 'poweroff -f\n'
+          sleep 6
+        } | \
+        env $([ -n '{{.TEST_PARANGE}}' ] && echo "QEMU_HVF_TEST_PARANGE={{.TEST_PARANGE}}") \
         QEMU_HVF_SYSREG_TRACE="$SYSREG_TRACE" \
-        timeout 45 "$QEMU" \
-          -machine virt,virtualization=on \
-          -accel hvf,fake-el2=on \
-          -cpu host \
+        timeout {{.BOOT_TIMEOUT}} "$QEMU" \
+          -machine "$M" \
+          -accel {{.ACCEL}} \
+          -cpu {{.CPU}} \
           -m 512 \
           -display none \
           -kernel "$KERNEL" \
           -initrd "$INITRD" \
-          -append "console=ttyAMA0 loglevel=7" \
-          -cdrom "$ISO" \
-          -serial file:"$SERIAL_OUT" \
+          -append "console=ttyAMA0 loglevel=7 init=/bin/sh {{.EXTRA_CMDLINE}}" \
+          -serial stdio \
           -monitor none \
           -no-reboot \
-          >> "$LOG" 2>&1 || QEMU_RC=$?
-        echo "[boot] qemu exit=$QEMU_RC (124=timeout, 0=clean)" >> "$LOG"
+          > "$SERIAL_OUT" 2> "$QERR" || QEMU_RC=$?
+        cat "$QERR" >> "$LOG"
+        echo "[boot] qemu exit=$QEMU_RC (0=clean poweroff, 124=timeout) machine=$M_TAG" >> "$LOG"
 
-        # H1/H2: check VHE diagnostic output (fprintf to stderr, captured in LOG)
-        if grep -q '\[VHE-DIAG\]' "$LOG"; then
-          VHE_DIAG_COUNT=$(grep -c '\[VHE-DIAG\]' "$LOG" || echo 0)
+        # show the in-guest verification results (stdout + log)
+        if grep -q 'GUEST-MARKER-BEGIN' "$SERIAL_OUT"; then
+          echo "[guest] in-guest CPU verification (machine=$M):" | tee -a "$LOG"
+          sed -n '/GUEST-MARKER-BEGIN/,/GUEST-MARKER-END/p' "$SERIAL_OUT" | sed 's/^/[guest]   /' | tee -a "$LOG"
+        else
+          echo "[guest] WARNING: in-guest commands did not run (no GUEST-MARKER in serial output)" | tee -a "$LOG"
+        fi
+
+        # H1/H2: check VHE diagnostic output (per-run stderr file, so counts
+        # are not inflated by earlier sections in the shared log)
+        if grep -q '\[VHE-DIAG\]' "$QERR"; then
+          VHE_DIAG_COUNT=$(grep -c '\[VHE-DIAG\]' "$QERR" || echo 0)
           echo "[boot] VHE diagnostic lines: $VHE_DIAG_COUNT found in QEMU stderr" >> "$LOG"
-          grep '\[VHE-DIAG\]' "$LOG" | sed 's/^/  /' >> "$LOG"
         else
           echo "[boot] WARNING: no [VHE-DIAG] lines — patch may not have compiled in" >> "$LOG"
         fi
 
         # H3: check TID3 trap activity (ID register reads now handled in our handler)
-        TID3_SET=$(grep -c '\[VHE-DIAG\] HCR_EL2 set TID3' "$LOG" 2>/dev/null || true)
-        TID3_TRAPS=$(grep -c '\[VHE-DIAG\] TID3 trap:' "$LOG" 2>/dev/null || true)
-        echo "[boot] TID3: set=$TID3_SET trap_count=$TID3_TRAPS" >> "$LOG"
+        TID3_SET=$(grep -c '\[VHE-DIAG\] HCR_EL2 set TID3' "$QERR" 2>/dev/null || true)
+        TID3_TRAPS=$(grep -c '\[VHE-DIAG\] TID3 trap:' "$QERR" 2>/dev/null || true)
+        echo "[boot] TID3: set=$TID3_SET trap_count=$TID3_TRAPS machine=$M_TAG" >> "$LOG"
         if [ "$TID3_TRAPS" -gt 0 ]; then
           echo "[boot] TID3 traps active — ID register reads routing through QEMU" >> "$LOG"
-          grep '\[VHE-DIAG\] TID3 trap:' "$LOG" | head -5 >> "$LOG" 2>/dev/null || true
+          grep '\[VHE-DIAG\] TID3 trap:' "$QERR" | head -5 >> "$LOG" 2>/dev/null || true
         fi
         if [ -f "$SYSREG_TRACE" ]; then
           TRACE_LINES=$(wc -l < "$SYSREG_TRACE" | tr -d ' ')
@@ -1325,23 +1729,148 @@ tasks:
           exit 1
         fi
 
+        # Capture crash/panic context (H8: WHY a forced-VHE guest dies)
+        if grep -qi 'Kernel panic\|Unable to handle\|Internal error\|Oops\|BUG:' "$SERIAL_OUT"; then
+          echo "[boot] CRASH context (machine=$M_TAG):" | tee -a "$LOG"
+          grep -iE 'Kernel panic|Unable to handle|Internal error|Oops|BUG:|Call trace|pc :|lr :|esr |exitcode|Synchronous|CurrentEL|VHE|E2H' "$SERIAL_OUT" | head -20 | sed 's/^/[boot]   /' | tee -a "$LOG"
+        fi
         # VHE litmus: does the guest see FEAT_VHE?
+        EL_LINE=$(grep -i 'started at EL' "$SERIAL_OUT" | head -1 || true)
+        [ -n "$EL_LINE" ] && echo "[boot] EL info (machine=$M): $EL_LINE" >> "$LOG"
         if grep -q 'Virtualization Host Extensions' "$SERIAL_OUT"; then
-          echo "[boot] VERDICT: VHE — guest sees FEAT_VHE" | tee -a "$LOG"
+          echo "[boot] VERDICT(machine=$M_TAG): VHE — guest sees FEAT_VHE" | tee -a "$LOG"
         elif grep -q 'nVHE\|Hyp nVHE' "$SERIAL_OUT"; then
-          echo "[boot] VERDICT: nVHE — guest does NOT see FEAT_VHE" | tee -a "$LOG"
-        elif grep -qi 'started at EL' "$SERIAL_OUT"; then
-          EL_LINE=$(grep -i 'started at EL' "$SERIAL_OUT" | head -1)
-          echo "[boot] EL info: $EL_LINE" >> "$LOG"
+          echo "[boot] VERDICT(machine=$M_TAG): nVHE — guest does NOT see FEAT_VHE" | tee -a "$LOG"
+        elif [ -n "$EL_LINE" ]; then
           if grep -q 'VHE mode' "$SERIAL_OUT"; then
-            echo "[boot] VERDICT: VHE" | tee -a "$LOG"
+            echo "[boot] VERDICT(machine=$M_TAG): VHE" | tee -a "$LOG"
           else
-            echo "[boot] VERDICT: nVHE (no VHE mode line)" | tee -a "$LOG"
+            echo "[boot] VERDICT(machine=$M_TAG): nVHE (no VHE mode line)" | tee -a "$LOG"
           fi
         else
-          echo "[boot] VERDICT: UNKNOWN — no VHE/nVHE markers in dmesg" | tee -a "$LOG"
+          echo "[boot] VERDICT(machine=$M_TAG): UNKNOWN — no VHE/nVHE markers in dmesg" | tee -a "$LOG"
         fi
         trap - EXIT
+
+  debug:qemu:el2:baremetal:
+    desc: 'macOS: bare-metal EL2 VHE probe — asks Apple guest-EL2 directly if E2H sticks + TTBR1_EL2 works (no Linux, no confounds)'
+    silent: true
+    vars:
+      VHE_DIR: '{{.ROOT_DIR}}/home/scripts/qemu/vhe'
+    cmds:
+      # H10: the DEFINITIVE, confound-free VHE test. el2_probe.bin runs at EL2
+      # with no Linux (no idreg-override refusal), no PARange forcing, no PCI.
+      # It sets HCR_EL2.E2H and reads it back, then round-trips TTBR1_EL2.
+      #   HVF real EL2: E2H_readback=1 + TTBR1 round-trips => VHE EXISTS, only
+      #     the ID bit is masked => faking VH for Windows becomes viable!
+      #   E2H_readback=0 or EXCEPTION => VHE behavior genuinely absent.
+      # TCG -cpu max is the positive control (must show E2H=1 + roundtrip).
+      - |
+        set -u
+        LOG='{{.QEMU_EL2_LOG}}'
+        ART='{{.QEMU_EL2_ARTIFACTS}}'
+        say() { echo "$@" | tee -a "$LOG"; }
+        [ -z "$ART" ] && ART="{{.ROOT_DIR}}/.context/debug/qemu/cache"
+        mkdir -p "$ART"
+        BIN='{{.VHE_DIR}}/el2_probe.bin'
+        Q="$(command -v qemu-system-aarch64 || true)"
+        say ""
+        say "### [baremetal] EL2 VHE probe (H10) — $BIN"
+        if [ ! -f "$BIN" ]; then say "[baremetal] SKIP — el2_probe.bin missing (build: see home/scripts/qemu/vhe/el2_probe.S)"; exit 0; fi
+        if [ -z "$Q" ]; then say "[baremetal] SKIP — no qemu-system-aarch64"; exit 0; fi
+        # accel/cpu pairs: HVF real EL2 (the real question) + TCG control
+        for PAIR in "hvf:host:hvf-el2" "tcg:max:tcg-control"; do
+          ACC="${PAIR%%:*}"; REST="${PAIR#*:}"; CPU="${REST%%:*}"; TAG="${REST#*:}"
+          OUT="$ART/baremetal-$TAG.log"
+          say "[baremetal] \$ qemu -machine virt,virtualization=on -accel $ACC -cpu $CPU -kernel el2_probe.bin"
+          timeout 30 "$Q" -machine virt,virtualization=on -accel "$ACC" -cpu "$CPU" \
+            -m 256 -display none -no-reboot -kernel "$BIN" -serial stdio -monitor none \
+            </dev/null > "$OUT" 2>&1 || true
+          grep -a 'EL2-PROBE' "$OUT" | sed 's/^/[baremetal]   /' | tee -a "$LOG" || say "[baremetal]   (no probe output)"
+        done
+
+  debug:qemu:el2:uefi:
+    desc: 'macOS: EDK2 firmware boot under virt,virtualization=on — CELL-431 repro, fake-el2=on vs off A/B'
+    silent: true
+    cmds:
+      # H7 (CELL-431): EDK2 runs AT EL2 under virtualization=on and needs its
+      # EL2 timer (CNTHP_*, op1=4/crn=14). Before the v4 patch the op1==4
+      # shadow interception swallowed those traps -> DXE stall. After the fix
+      # (pass-through when real EL2 present) fake-el2=on must reach BDS/Shell
+      # exactly like the fake-el2=off control. Sysreg trace shows whether
+      # EL2-timer traps actually occur during the firmware phase.
+      - |
+        set -u
+        LOG='{{.QEMU_EL2_LOG}}'
+        say() { echo "$@" | tee -a "$LOG"; }
+        CACHE="{{.ROOT_DIR}}/.context/debug/qemu/cache"
+        ART='{{.QEMU_EL2_ARTIFACTS}}'
+        [ -z "$ART" ] && ART="$CACHE"
+        mkdir -p "$CACHE" "$ART" "$(dirname "$LOG")"
+        say ""
+        say "### [uefi] EDK2 boot, machine=virt,virtualization=on (CELL-431 / H7)"
+        NIX_EXPR='
+          let
+            flake = builtins.getFlake "git+file://{{.ROOT_DIR}}";
+            system = builtins.currentSystem;
+            pkgs = import flake.inputs.nixpkgs { inherit system; };
+            pkgsEdge = import flake.inputs.nixpkgs-edge { inherit system; };
+          in import {{.ROOT_DIR}}/home/dmitry/packages/qemu-rc.nix { inherit pkgs pkgsEdge; }
+        '
+        QEMU_OUT=$(nix build --impure --no-eval-cache --no-link --print-out-paths --expr "$NIX_EXPR" 2>> "$LOG" | head -1)
+        if [ -z "$QEMU_OUT" ] || [ ! -d "$QEMU_OUT" ]; then
+          say "[uefi] BUILD FAILED — see $LOG"; exit 1
+        fi
+        CODE="$QEMU_OUT/share/qemu/edk2-aarch64-code.fd"
+        if [ ! -f "$CODE" ]; then
+          say "[uefi] SKIP — no edk2-aarch64-code.fd in $QEMU_OUT/share/qemu"; exit 0
+        fi
+        for FE in on off; do
+          VARS="$ART/edk2-vars-$FE.fd"
+          SER="$ART/serial-uefi-$FE.log"
+          TRACE="$ART/sysreg-trace-uefi-$FE.jsonl"
+          QERR="$ART/qemu-stderr-uefi-$FE.log"
+          rm -f "$VARS" "$SER" "$TRACE" "$QERR"
+          if [ -f "$QEMU_OUT/share/qemu/edk2-arm-vars.fd" ]; then
+            cp -f "$QEMU_OUT/share/qemu/edk2-arm-vars.fd" "$VARS"; chmod u+w "$VARS"
+          else
+            dd if=/dev/zero of="$VARS" bs=1048576 count=64 2>/dev/null
+          fi
+          say "[uefi] fake-el2=$FE: booting firmware (timeout 45s, no disks -> expect BDS/Shell)..."
+          QEMU_HVF_SYSREG_TRACE="$TRACE" \
+          timeout 45 "$QEMU_OUT/bin/qemu-system-aarch64" \
+            -machine virt,virtualization=on -cpu host -accel hvf,fake-el2=$FE -m 512 \
+            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,file="$VARS" \
+            -display none -serial stdio -monitor none -no-reboot \
+            </dev/null > "$SER" 2> "$QERR" || true
+          cat "$QERR" >> "$LOG"
+          LINES=$(wc -l < "$SER" 2>/dev/null | tr -d ' ' || echo 0)
+          # PROGRESS markers: explicit BDS/Shell text OR the ANSI clear-screen
+          # sequences ("[2J") the firmware emits when BDS initializes the
+          # console — with no boot media that's as far as EDK2 goes on serial.
+          # A true DXE stall (CELL-431) dies BEFORE console init: serial ends
+          # at the Tpm2/X64 lines with no ANSI escapes.
+          if grep -aq 'BdsDxe\|Shell>\|UEFI Interactive Shell\|Boot Manager\|UsbBootExecCmd' "$SER" || grep -aq '\[2J' "$SER"; then
+            say "[uefi] fake-el2=$FE: PROGRESS — firmware reached BDS/console init (serial: $LINES lines)"
+          elif grep -aq 'UEFI firmware' "$SER"; then
+            say "[uefi] fake-el2=$FE: STALL — banner printed, died before BDS console init (serial: $LINES lines)"
+          else
+            say "[uefi] fake-el2=$FE: NO OUTPUT — firmware did not start (serial: $LINES lines)"
+          fi
+          TT=$(wc -l < "$TRACE" 2>/dev/null | tr -d ' ' || echo 0)
+          T4=$(grep -ac '"op1":4' "$TRACE" 2>/dev/null || echo 0)
+          T14=$(grep -a '"op1":4' "$TRACE" 2>/dev/null | grep -ac '"crn":14' || echo 0)
+          say "[uefi] fake-el2=$FE: sysreg traps total=$TT op1=4: $T4 EL2-timer(op1=4,crn=14): $T14"
+        done
+        # Parity check: with the pass-through gating, fake-el2=on must behave
+        # byte-identically to off (same serial output). Strongest local proof
+        # that the patch no longer perturbs firmware running at real EL2.
+        if cmp -s "$ART/serial-uefi-on.log" "$ART/serial-uefi-off.log" 2>/dev/null; then
+          say "[uefi] PARITY: serial output byte-identical for fake-el2=on vs off"
+        else
+          say "[uefi] PARITY: serial outputs DIFFER between fake-el2=on and off (see $ART/serial-uefi-{on,off}.log)"
+        fi
 
   debug:qemu:el2:trace:
     desc: 'macOS: replay real sysreg trace through VHE core, report unhandled regs'

@@ -14,14 +14,6 @@
   lib,
   ...
 }:
-let
-  commonPackages = import ../../home/dmitry/packages/common.nix {
-    inherit pkgs pkgsUnstable pkgsEdge pkgsLegacy;
-  };
-  linuxPackages = import ../../home/dmitry/packages/linux.nix {
-    inherit pkgs pkgsEdge;
-  };
-in
 {
   home = {
     username = "deck";
@@ -40,8 +32,29 @@ in
       ];
     };
 
-    packages = commonPackages ++ linuxPackages ++ (with pkgs; [
+    packages = with pkgs; [
+      # Core utilities
+      coreutils
+      findutils
+      tree
+      unzip
+      wget
+      ripgrep
+      htop
+      curl
+      git
+      lazygit
+      gh
+      go-task
+      fzf
+      yazi
+
+      # Kubernetes
       k3s
+      kubectl
+      kubernetes-helm
+    ] ++ (with pkgsUnstable; [
+      k9s
     ]);
 
     file.".config/environment.d/10-nix.conf".text = ''

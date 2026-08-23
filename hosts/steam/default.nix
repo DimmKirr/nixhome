@@ -111,8 +111,6 @@
   xdg.configFile."vifm/vifmrc".source             = ../../home/programs/vifm/vifmrc;
   xdg.configFile."vifm/colors".source             = ../../home/programs/vifm/colors;
 
-  programs.zsh.shellAliases.sudo = ''sudo env PATH="$PATH"'';
-
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
 

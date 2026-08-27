@@ -31,6 +31,12 @@ tasks:
       - tmux source-file ~/.config/tmux/tmux.conf
       - date -u +%Y-%m-%dT%H:%M:%SZ
 
+  update:
+    desc: Update all flake inputs (nixpkgs, home-manager, devcell, etc.)
+    silent: true
+    cmds:
+      - nix flake update
+
   prune:
     desc: Prune all unused Nix store derivations
     silent: true

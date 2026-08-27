@@ -339,6 +339,10 @@ in {
     sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 61 \
       '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>786432</integer></array></dict></dict>'
 
+    # Disable double-press Globe/Fn → Dictation (hotkey 164)
+    sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 164 \
+      '<dict><key>enabled</key><false/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>65535</integer><integer>65535</integer><integer>0</integer></array></dict></dict>'
+
     # Disable Spotlight search Cmd+Space (hotkey 64) and Finder search Cmd+Option+Space (hotkey 65)
     # so Raycast owns Cmd+Space exclusively
     sudo -u dmitry defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 \

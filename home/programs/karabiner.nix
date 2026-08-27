@@ -3,7 +3,7 @@
 let
   jsonFormat = pkgs.formats.json {};
   # F5 and F6 excluded - handled separately in specialFunctionKeysRules
-  # (they require different key types: apple_vendor_keyboard_key_code and generic_desktop)
+  # F5 sends consumer_key_code "dictation" from hardware; F6 uses key_code "f6"
   keyCodes = [
     "f1"
     "f2"
@@ -17,8 +17,9 @@ let
     "f12"
   ];
 
-  # All function keys including F5/F6 for fn_function_keys setting
-  allFunctionKeyCodes = keyCodes ++ ["f5" "f6"];
+  # All function keys including F6 for fn_function_keys setting
+  # F5 excluded: hardware sends consumer_key_code "dictation", handled in specialFunctionKeysRules
+  allFunctionKeyCodes = keyCodes ++ ["f6"];
 
   bundleIdentifiers = [
     "com.jetbrains.PhpStorm"
@@ -202,7 +203,7 @@ let
     {
       type = "basic";
       from = {
-        key_code = "f5";
+        consumer_key_code = "dictation";
         modifiers = {
           mandatory = ["fn"];
         };
@@ -241,7 +242,7 @@ let
     {
       type = "basic";
       from = {
-        key_code = "f5";
+        consumer_key_code = "dictation";
       };
       to = [{
         key_code = "f5";
@@ -269,11 +270,11 @@ let
         }
       ];
     }
-    # F5 -> Dictation outside bundleIdentifiers
+    # F5 -> Dictation outside bundleIdentifiers (passthrough, keeps native behavior explicit)
     {
       type = "basic";
       from = {
-        key_code = "f5";
+        consumer_key_code = "dictation";
       };
       to = [{
         consumer_key_code = "dictation";
@@ -400,7 +401,7 @@ let
               manipulators = remapOtherKeysRules;
             }
             {
-              description = "F5 Spotlight and F6 Do Not Disturb";
+              description = "F5 Dictation and F6 Do Not Disturb";
               manipulators = specialFunctionKeysRules;
             }
             {

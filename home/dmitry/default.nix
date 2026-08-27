@@ -159,6 +159,14 @@
 
   devcell = {
     enable = true;
+    cell.default_command = "claude";
+    env = {
+      CLAUDE_CODE_DISABLE_AGENT_VIEW = "1";
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
+      CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1";
+      CLAUDE_CODE_DISABLE_MOUSE = "1";
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+    };
     volumes = [
       { mount = "/Users/dmitry/dev/dimmkirr/skills/"; }
       { mount = "/Users/dmitry/dev/kirr/skills/"; }
@@ -167,7 +175,7 @@
       { mount = "/Users/dmitry/dev/kiwa/skills/"; }
       { mount = "/Users/dmitry/dev/nmd/private-skills/"; }
       { mount = "/Users/dmitry/dev/hazelops/skills/"; }
-      { mount = "/Users/dmitry/.cache/uv:/Users/dmitry/.cache/uv"; }
+      { mount = "/Users/dmitry/.cache:/home/dmitry/.cache"; }
     ];
     # Layered on top of Claude Code's built-in system prompt (--append-system-prompt-file).
     # Do NOT use llm.system_prompt / prompt here — that REPLACES the built-in prompt entirely.

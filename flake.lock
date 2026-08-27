@@ -132,11 +132,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786378645,
-        "narHash": "sha256-Wm2qcC0cpkIan74e5rTy/lzSMVMHmL74l1dJJSzc/P0=",
+        "lastModified": 1787741584,
+        "narHash": "sha256-BKbATaT7+QhB51fKljairDUPGGSfmLznmoWGpGPsMNU=",
         "owner": "devcell-sh",
         "repo": "devcell",
-        "rev": "9d0664db848d5d5fc1514f17d5d084649af4d597",
+        "rev": "48921a764e88cc108e5c88ac32c49c4428933410",
         "type": "github"
       },
       "original": {
@@ -676,6 +676,21 @@
         "type": "github"
       }
     },
+    "nix-flatpak": {
+      "locked": {
+        "lastModified": 1783368811,
+        "narHash": "sha256-0H8jDwR4Kegb3heaTrH1ftbgKfZVDT8JE+46uXxDy/Q=",
+        "owner": "gmodena",
+        "repo": "nix-flatpak",
+        "rev": "20d42f0ee98c9fe9f85e8d1de474f1409ed10d05",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gmodena",
+        "repo": "nix-flatpak",
+        "type": "github"
+      }
+    },
     "nix2container": {
       "inputs": {
         "nixpkgs": [
@@ -1087,6 +1102,7 @@
         "devcell": "devcell",
         "home-manager": "home-manager_2",
         "nix-darwin": "nix-darwin",
+        "nix-flatpak": "nix-flatpak",
         "nixpkgs": "nixpkgs_5",
         "nixpkgs-edge": "nixpkgs-edge",
         "nixpkgs-legacy": "nixpkgs-legacy",

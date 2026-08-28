@@ -269,12 +269,18 @@ in
         systemctl daemon-reload
         systemctl enable gpu-teardown.service 2>/dev/null
 
-        # --- 6. Dereference Lua display profile symlinks ---
+        # --- 6. Install Lua display profile as a plain file ---
+        # gamescope reads this before /nix is reliably mounted, so the real
+        # path must be a regular file. HM owns only the staging copy in
+        # gamescope/scripts-src; we install it here. Keeping HM off the final
+        # path avoids the symlink/file flip-flop that caused backup prompts.
+        lua_src=/home/deck/.config/gamescope/scripts-src/sony.bravia.lua
         lua=/home/deck/.config/gamescope/scripts/00-gamescope/displays/sony.bravia.lua
-        if [ -L "$lua" ]; then
-          cp --dereference "$lua" "$lua.tmp" && mv "$lua.tmp" "$lua"
+        if [ -e "$lua_src" ] && ! cmp -s "$lua_src" "$lua"; then
+          install -D -m 644 -o deck -g deck "$lua_src" "$lua"
           changed=1
         fi
+        rm -f "$lua.backup" "$lua.tmp"
 
         # --- 7. Patch gamescope-session (HDR) ---
         src=/usr/lib/steamos/gamescope-session
@@ -368,7 +374,9 @@ in
     };
   };
 
-  xdg.configFile."gamescope/scripts/00-gamescope/displays/sony.bravia.lua".text = ''
+  # Staging copy only — activate-persistent-fixes installs it to
+  # gamescope/scripts/00-gamescope/displays/ as a plain file (see step 6).
+  xdg.configFile."gamescope/scripts-src/sony.bravia.lua".text = ''
     gamescope.config.known_displays.sony_bravia = {
         pretty_name = "Sony BRAVIA TV",
         dynamic_refresh_rates = { 60, 120 },

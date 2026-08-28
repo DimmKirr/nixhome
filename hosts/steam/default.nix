@@ -14,6 +14,30 @@
   lib,
   ...
 }:
+let
+  # GE-Proton: full DualSense haptics + controller-speaker support (11-4+),
+  # 11-5 fixes the EAC regression from 11-4. Newer than nixpkgs' proton-ge-bin.
+  # Update: bump version, refresh hash from the release's *-x86_64.sha512sum
+  # (or nix store prefetch-file <url>).
+  proton-ge = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+    pname = "proton-ge-bin";
+    version = "GE-Proton11-5";
+    src = pkgs.fetchurl {
+      url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${finalAttrs.version}/${finalAttrs.version}-x86_64.tar.gz";
+      hash = "sha256-3kPEsl88BH20m5bETYR1mVLFoBMypogFoJ5p+V3DinU=";
+    };
+    dontConfigure = true;
+    dontBuild = true;
+    # Proton ships prebuilt binaries; stripping/patchelf would corrupt them
+    dontFixup = true;
+    installPhase = ''
+      runHook preInstall
+      mkdir -p $out
+      cp -r ./* $out/
+      runHook postInstall
+    '';
+  });
+in
 {
   home = {
     username = "deck";
@@ -55,6 +79,9 @@
       k9s
     ]);
 
+    # Steam picks up compat tools from compatibilitytools.d; symlink into the store
+    file.".local/share/Steam/compatibilitytools.d/GE-Proton11-5".source = proton-ge;
+
     file.".config/environment.d/10-nix.conf".text = ''
       PATH=$PATH:$HOME/.local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin
       TMPDIR=/home/deck/.tmp
@@ -74,7 +101,9 @@
       [Service]
       Type=exec
       EnvironmentFile=-/home/deck/.config/k3s/env.local
-      ExecStart=/home/deck/.nix-profile/bin/k3s agent --data-dir /home/.rancher/k3s --snapshotter=native
+      # native duplicates every layer chain (~1M inodes); overlayfs is blocked
+      # by casefold on /home, so use fuse-overlayfs (/usr/bin/fuse-overlayfs)
+      ExecStart=/home/deck/.nix-profile/bin/k3s agent --data-dir /home/.rancher/k3s --snapshotter=fuse-overlayfs
       Restart=always
       RestartSec=5
       KillMode=process
@@ -232,7 +261,7 @@
               '[Service]' \
               'Type=exec' \
               "EnvironmentFile=$k3s_env" \
-              "ExecStart=$k3s_bin agent --data-dir /home/.rancher/k3s --snapshotter=native" \
+              "ExecStart=$k3s_bin agent --data-dir /home/.rancher/k3s --snapshotter=fuse-overlayfs" \
               'Restart=always' \
               'RestartSec=5' \
               'KillMode=process' \
@@ -376,7 +405,9 @@
     direnv   = import ../../home/programs/direnv.nix   { inherit pkgs; };
     git      = import ../../home/programs/git.nix      { inherit pkgs; };
     tmux     = import ../../home/programs/tmux.nix     { pkgs = pkgsUnstable; };
-    nixvim   = import ../../home/programs/nixvim.nix   { inherit pkgs; };
+    nixvim   = lib.recursiveUpdate (import ../../home/programs/nixvim.nix { inherit pkgs; }) {
+      plugins.lsp.servers.basedpyright.enable = false;
+    };
     zoxide   = import ../../home/programs/zoxide.nix   { inherit pkgs; };
     bash = {
       enable = true;

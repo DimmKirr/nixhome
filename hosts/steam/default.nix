@@ -413,6 +413,7 @@
     ];
     packages = [
       { appId = "com.nvidia.geforcenow"; origin = "GeForceNOW"; }
+      "net.davidotek.pupgui2"
     ];
     update.onActivation = true;
   };

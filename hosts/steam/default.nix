@@ -80,7 +80,50 @@ in
     ]);
 
     # Steam picks up compat tools from compatibilitytools.d; symlink into the store
-    file.".local/share/Steam/compatibilitytools.d/GE-Proton11-5".source = proton-ge;
+    file.".local/share/Steam/compatibilitytools.d/${proton-ge.version}".source = proton-ge;
+
+    # Set proton-ge as the GLOBAL compat tool (app id "0" in CompatToolMapping).
+    # config.vdf is mutable state Steam rewrites at will, so it can't be a
+    # home.file symlink — patch it idempotently on activation instead.
+    # Skipped while Steam is running (it would overwrite the edit on exit).
+    activation.steamGlobalCompatTool = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      run ${pkgs.python3.withPackages (ps: [ ps.vdf ])}/bin/python3 ${
+        pkgs.writeText "steam-global-compat.py" ''
+          import os
+          import shutil
+          import sys
+
+          import vdf
+
+          path = os.path.expanduser("~/.local/share/Steam/config/config.vdf")
+          tool = "${proton-ge.version}"
+
+          if os.system("pgrep -x steam >/dev/null 2>&1") == 0:
+              print("steamGlobalCompatTool: Steam running, skipping", file=sys.stderr)
+              sys.exit(0)
+          if not os.path.exists(path):
+              print(f"steamGlobalCompatTool: {path} not found, skipping", file=sys.stderr)
+              sys.exit(0)
+
+          with open(path) as f:
+              data = vdf.load(f)
+
+          # key case varies between installs
+          store = data.get("InstallConfigStore") or data["installconfigstore"]
+          node = store["Software"]
+          node = node.get("Valve") or node["valve"]
+          node = node.get("Steam") or node["steam"]
+          mapping = node.setdefault("CompatToolMapping", {})
+
+          if mapping.get("0", {}).get("name") != tool:
+              mapping["0"] = {"name": tool, "config": "", "priority": "75"}
+              shutil.copy2(path, path + ".bak-hm")
+              with open(path, "w") as f:
+                  vdf.dump(data, f, pretty=True)
+              print(f"steamGlobalCompatTool: set global compat tool to {tool}")
+        ''
+      }
+    '';
 
     file.".config/environment.d/10-nix.conf".text = ''
       PATH=$PATH:$HOME/.local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin

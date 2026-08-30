@@ -80,6 +80,7 @@ let
 
     # qemu  # removed: conflicts with androidsdk's bundled qemu-img
     android-tools
+    scrcpy
     spice
     freerdp
     virt-viewer

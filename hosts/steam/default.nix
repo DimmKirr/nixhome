@@ -75,9 +75,30 @@ in
       # Kubernetes
       k3s
       kubernetes-helm
+
+      # GPU/media debugging (av1/vaapi/vulkan probes — see steam repo test:av1-decode)
+      libva-utils      # vainfo
+      vulkan-tools     # vulkaninfo
+      mesa-demos       # glxgears/vkgears
+      ffmpeg-full      # hwaccel decode tests (vaapi + vulkan)
     ] ++ (with pkgsUnstable; [
       k9s
     ]);
+
+    # Session switching shortcuts: `task desktop` / `task game` (or `task gamemode`)
+    file."Taskfile.yml".text = ''
+      version: "3"
+
+      tasks:
+        desktop:
+          desc: Switch to Desktop Mode (Plasma)
+          cmd: steamos-session-select plasma
+
+        game:
+          desc: Switch to Game Mode (gamescope)
+          aliases: [gamemode]
+          cmd: steamos-session-select gamescope
+    '';
 
     # Steam picks up compat tools from compatibilitytools.d; symlink into the store
     file.".local/share/Steam/compatibilitytools.d/${proton-ge.version}".source = proton-ge;

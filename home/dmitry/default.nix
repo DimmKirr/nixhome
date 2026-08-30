@@ -173,6 +173,7 @@
       { mount = "/Users/dmitry/dev/mad/skills/"; }
       { mount = "/Users/dmitry/dev/ptc/skills/"; }
       { mount = "/Users/dmitry/dev/kiwa/skills/"; }
+      { mount = "/Users/dmitry/dev/fam/skills/"; }
       { mount = "/Users/dmitry/dev/nmd/private-skills/"; }
       { mount = "/Users/dmitry/dev/hazelops/skills/"; }
       { mount = "/Users/dmitry/.cache:/home/dmitry/.cache"; }

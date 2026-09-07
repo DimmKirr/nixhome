@@ -10,6 +10,7 @@ with pkgs; [
   google-fonts
   defaultbrowser
   raycast
+  hidden-bar # Menu bar icon hider (replaces Bartender)
   # ext4fuse — removed from nixpkgs (unmaintained, depends on fuse2, removed 2026-08-12)
   cocoapods
   fastlane

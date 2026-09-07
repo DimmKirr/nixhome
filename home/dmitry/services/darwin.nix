@@ -10,6 +10,22 @@
     };
   };
 
+  launchd.agents.hidden-bar = {
+    enable = true;
+    config = {
+      Label = "com.dwarvesv.minimalbar.launch";
+      ProgramArguments = [ "${pkgs.hidden-bar}/Applications/Hidden Bar.app/Contents/MacOS/Hidden Bar" ];
+      RunAtLoad = true;
+      KeepAlive = true;
+    };
+  };
+
+  # Hidden Bar preferences (launchd handles autostart, so isAutoStart stays off)
+  targets.darwin.defaults."com.dwarvesv.minimalbar" = {
+    isAutoStart = false;
+    isAutoHide = true;
+  };
+
   launchd.agents.libvirtd = {
     enable = true;
     config = {

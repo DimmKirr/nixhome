@@ -21,7 +21,6 @@
     "scribus"
     "1password"
     "1password-cli"
-    "bartender"
     "steam"
     "ghostty"
     "typefully"

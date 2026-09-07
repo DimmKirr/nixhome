@@ -92,12 +92,52 @@ in
       tasks:
         desktop:
           desc: Switch to Desktop Mode (Plasma)
-          cmd: steamos-session-select plasma
+          cmds:
+            # steamosctl (SteamOS 3.7+) switches via the steamos-manager daemon
+            # and works from SSH/TTY; sddm restart is the fallback of last resort
+            - steamosctl switch-to-desktop-mode || steamos-session-select plasma
+            - sleep 3
+            # (task's shell propagates a failed `if` condition, hence &&/|| form)
+            - pgrep -x gamescope >/dev/null && sudo systemctl restart sddm || true
+            - task: wait-for
+              vars: { STOP: gamescope, START: plasmashell }
 
         game:
           desc: Switch to Game Mode (gamescope)
           aliases: [gamemode]
-          cmd: steamos-session-select gamescope
+          cmds:
+            - steamosctl switch-to-game-mode || steamos-session-select gamescope
+            - sleep 3
+            - pgrep -x plasmashell >/dev/null && sudo systemctl restart sddm || true
+            - task: wait-for
+              vars: { STOP: plasmashell, START: gamescope }
+
+        wait-for:
+          internal: true
+          silent: true
+          cmd: |
+            for i in $(seq 1 60); do
+              pgrep -x {{.STOP}} >/dev/null && { printf '\rwaiting: {{.STOP}} shutting down (%ss)' "$i"; sleep 1; continue; }
+              break
+            done
+            echo ""
+            for i in $(seq 1 60); do
+              pgrep -x {{.START}} >/dev/null && { echo "{{.START}} is up"; exit 0; }
+              printf '\rwaiting: {{.START}} starting (%ss)' "$i"
+              sleep 1
+            done
+            echo ""
+            echo "timed out waiting for {{.START}}" >&2
+            exit 1
+
+        hms:
+          desc: Pull nixhome and activate the home-manager config
+          dir: ~/.config/home-manager
+          cmds:
+            - git pull
+            - find ~ -maxdepth 5 -name '*.backup*' -delete 2>/dev/null || true
+            - home-manager switch --flake .#steam -b backup
+            - find ~ -maxdepth 5 -name '*.backup' -delete 2>/dev/null || true
     '';
 
     # Steam picks up compat tools from compatibilitytools.d; symlink into the store

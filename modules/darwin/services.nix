@@ -1,4 +1,4 @@
-{ pkgsEdge, ... }: {
+{ pkgs, ... }: {
   imports = [
     ./services/ollama.nix
   ];
@@ -6,7 +6,13 @@
   services = {
     ollama = {
       enable = true;
-      package = pkgsEdge.ollama;  # edge (nixpkgs master) for latest version
+      # Official prebuilt binary — the only way to get the MLX backend:
+      # nixpkgs' source build disables it (Metal toolchain unavailable in
+      # the nix sandbox). Version/hash are pinned at this call site.
+      package = pkgs.callPackage ../../pkgs/ollama-bin.nix {
+        version = "0.33.3";
+        hash = "sha256-NC2wPfgLuduE/2QkYDG9X3DAm1n/UvpcyaquNHbMSp0=";
+      };
       # host = "0.0.0.0";  # to expose on all interfaces
       # models = "/path/to/models";
       environmentVariables = {

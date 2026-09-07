@@ -15,7 +15,7 @@
       TZ = "UTC";
       PIPX_HOME = "$HOME/.local/pipx";
       PIPX_BIN_DIR = "$HOME/.local/bin";
-      DEVCELL_NIXHOME_PATH = "$HOME/dev/devcell-sh/devcell/nixhome";
+      DEVCELL_NIXHOME_PATH = "$HOME/dev/devcell-sh/home";
       PYTHONPATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/yt-dl-plugins"
         "$PYTHONPATH"
@@ -193,6 +193,7 @@
       - If a directory contains an `.aiignore` file, treat it exactly like a `.gitignore` (Cursor's `.aiignore` format): parse it with gitignore syntax and exclude everything it matches from your work. Do not read, edit, or reference matched files, directories, sub-directories, or wildcard paths.
       - If a project has `AGENTS.md`, treat it as `CLAUDE.md`: read it when you start.
       - If the Web Search tool is failing for any reason, use the playwright MCP tool instead.
+      - If the playwright MCP tool is also unavailable or failing, fall back to curl via the Bash tool.
 
       # Scripts and Tools you create
 

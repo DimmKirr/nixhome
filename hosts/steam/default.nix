@@ -248,6 +248,7 @@ in
 
         # --- 1. System service (re-applies patches on boot, before sddm) ---
         svc=/etc/systemd/system/activate-persistent-fixes.service
+        tmp_svc1=$(mktemp)
         printf '%s\n' \
           '[Unit]' \
           'Description=SteamOS persistent fixes (GPU passthrough)' \
@@ -261,9 +262,14 @@ in
           ' ' \
           '[Install]' \
           'WantedBy=multi-user.target' \
-          > "$svc"
-        systemctl daemon-reload
-        systemctl enable activate-persistent-fixes.service 2>/dev/null
+          > "$tmp_svc1"
+        if ! cmp -s "$tmp_svc1" "$svc"; then
+          install -m 644 "$tmp_svc1" "$svc"
+          systemctl daemon-reload
+          systemctl enable activate-persistent-fixes.service 2>/dev/null
+          echo "activate-persistent-fixes: boot service unit updated"
+        fi
+        rm -f "$tmp_svc1"
 
         # Clean up old/renamed services
         for old in steamos-persistent-fixes gamescope-session-patch; do
@@ -314,6 +320,7 @@ in
 
         # --- 5. GPU teardown service (NMD-299: clean release before shutdown) ---
         gpu_svc=/etc/systemd/system/gpu-teardown.service
+        tmp_gpu=$(mktemp)
         printf '%s\n' \
           '[Unit]' \
           'Description=Release GPU before shutdown' \
@@ -326,9 +333,14 @@ in
           ' ' \
           '[Install]' \
           'WantedBy=shutdown.target reboot.target halt.target' \
-          > "$gpu_svc"
-        systemctl daemon-reload
-        systemctl enable gpu-teardown.service 2>/dev/null
+          > "$tmp_gpu"
+        if ! cmp -s "$tmp_gpu" "$gpu_svc"; then
+          install -m 644 "$tmp_gpu" "$gpu_svc"
+          systemctl daemon-reload
+          systemctl enable gpu-teardown.service 2>/dev/null
+          echo "activate-persistent-fixes: gpu-teardown unit updated"
+        fi
+        rm -f "$tmp_gpu"
 
         # --- 6. Install Lua display profile as a plain file ---
         # gamescope reads this before /nix is reliably mounted, so the real
@@ -362,6 +374,7 @@ in
           if [ -z "$k3s_bin" ] || [ ! -x "$k3s_bin" ]; then
             echo "activate-persistent-fixes: SKIP k3s-agent (nix k3s binary not found)"
           else
+            tmp_k3s=$(mktemp)
             printf '%s\n' \
               '[Unit]' \
               'Description=K3s Agent' \
@@ -382,11 +395,19 @@ in
               ' ' \
               '[Install]' \
               'WantedBy=multi-user.target' \
-              > "$k3s_svc"
+              > "$tmp_k3s"
 
-            systemctl daemon-reload
-            systemctl enable k3s-agent.service 2>/dev/null
-            systemctl restart k3s-agent.service 2>/dev/null || true
+            if ! cmp -s "$tmp_k3s" "$k3s_svc"; then
+              install -m 644 "$tmp_k3s" "$k3s_svc"
+              systemctl daemon-reload
+              systemctl enable k3s-agent.service 2>/dev/null
+              systemctl restart k3s-agent.service 2>/dev/null || true
+              echo "activate-persistent-fixes: k3s-agent unit updated + restarted"
+            elif ! systemctl is-active --quiet k3s-agent.service; then
+              systemctl start k3s-agent.service 2>/dev/null || true
+              echo "activate-persistent-fixes: k3s-agent was inactive, started"
+            fi
+            rm -f "$tmp_k3s"
             echo "activate-persistent-fixes: k3s-agent enabled (binary=$k3s_bin)"
           fi
         else
@@ -405,6 +426,7 @@ in
           chown -R deck:deck /home/deck/homebrew
         fi
         decky_svc=/etc/systemd/system/plugin_loader.service
+        tmp_decky=$(mktemp)
         printf '%s\n' \
           '[Unit]' \
           'Description=SteamDeck Plugin Loader' \
@@ -424,10 +446,18 @@ in
           ' ' \
           '[Install]' \
           'WantedBy=multi-user.target' \
-          > "$decky_svc"
-        systemctl daemon-reload
-        systemctl enable plugin_loader.service 2>/dev/null
-        systemctl start plugin_loader.service 2>/dev/null || true
+          > "$tmp_decky"
+        if ! cmp -s "$tmp_decky" "$decky_svc"; then
+          install -m 644 "$tmp_decky" "$decky_svc"
+          systemctl daemon-reload
+          systemctl enable plugin_loader.service 2>/dev/null
+          systemctl restart plugin_loader.service 2>/dev/null || true
+          echo "activate-persistent-fixes: plugin_loader unit updated + restarted"
+        elif ! systemctl is-active --quiet plugin_loader.service; then
+          systemctl start plugin_loader.service 2>/dev/null || true
+          echo "activate-persistent-fixes: plugin_loader was inactive, started"
+        fi
+        rm -f "$tmp_decky"
 
         steamos-readonly enable
         echo "activate-persistent-fixes: done"
@@ -486,7 +516,10 @@ in
     Service = {
       Type = "oneshot";
       ExecStart = toString (pkgs.writeShellScript "persistent-fixes-watchdog" ''
+        stamp=/run/user/$(id -u)/persistent-fixes-watchdog.done
+        [ -e "$stamp" ] && exit 0
         if sudo -n /home/deck/.local/bin/activate-persistent-fixes 2>/dev/null; then
+          touch "$stamp"
           exit 0
         fi
         # Sudoers rule is missing (wiped by SteamOS update)

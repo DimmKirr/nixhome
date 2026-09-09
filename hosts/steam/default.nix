@@ -69,6 +69,7 @@ in
       gh
       go-task
       fzf
+      qemu_kvm.ga  # qemu-ga; system unit installed by activate-persistent-fixes
       yazi
       nettools
 
@@ -227,6 +228,48 @@ in
       K3S_TOKEN=<node-token>
     '';
 
+    # Toggle between Game Mode (gamescope) and Desktop Mode (Plasma).
+    # Detection mirrors the Taskfile desktop/game tasks above.
+    file.".local/bin/switch-steamos-mode" = {
+      executable = true;
+      text = ''
+        #!/bin/bash
+        set -euo pipefail
+
+        if pgrep -x gamescope >/dev/null; then
+          current=game; target=desktop
+          switch() { steamosctl switch-to-desktop-mode || steamos-session-select plasma; }
+          stop=gamescope start=plasmashell
+        elif pgrep -x plasmashell >/dev/null; then
+          current=desktop; target=game
+          switch() { steamosctl switch-to-game-mode || steamos-session-select gamescope; }
+          stop=plasmashell start=gamescope
+        else
+          echo "switch-steamos-mode: neither gamescope nor plasmashell running, defaulting to game mode" >&2
+          current=none; target=game
+          switch() { steamosctl switch-to-game-mode || steamos-session-select gamescope; }
+          stop="" start=gamescope
+        fi
+
+        echo "switch-steamos-mode: $current -> $target"
+        switch
+        sleep 3
+        # If the old session is still up, restart sddm as the fallback of last resort
+        if [ -n "$stop" ] && pgrep -x "$stop" >/dev/null; then
+          sudo systemctl restart sddm || true
+        fi
+
+        for i in $(seq 1 60); do
+          pgrep -x "$start" >/dev/null && { echo "$start is up"; exit 0; }
+          printf '\rwaiting: %s starting (%ss)' "$start" "$i"
+          sleep 1
+        done
+        echo ""
+        echo "timed out waiting for $start" >&2
+        exit 1
+      '';
+    };
+
     file.".local/bin/activate-persistent-fixes" = {
       executable = true;
       text = ''
@@ -307,6 +350,7 @@ in
           'systemd/system/gpu-teardown.service' \
           'systemd/system/plugin_loader.service' \
           'systemd/system/k3s-agent.service' \
+          'systemd/system/qemu-guest-agent.service' \
           > /etc/atomic-update.conf.d/keep-persistent-fixes.conf
 
         # --- 4. amdgpu module params (FRL + DSC + FreeSync + deep color) ---
@@ -458,6 +502,41 @@ in
           echo "activate-persistent-fixes: plugin_loader was inactive, started"
         fi
         rm -f "$tmp_decky"
+
+        # --- 10. QEMU Guest Agent (Proxmox VM integration) ---
+        qga_bin=$(readlink -f /home/deck/.nix-profile/bin/qemu-ga 2>/dev/null || readlink -f /home/deck/.local/state/nix/profiles/profile/bin/qemu-ga 2>/dev/null || true)
+        if [ -z "$qga_bin" ] || [ ! -x "$qga_bin" ]; then
+          echo "activate-persistent-fixes: SKIP qemu-guest-agent (nix qemu-ga binary not found)"
+        else
+          qga_svc=/etc/systemd/system/qemu-guest-agent.service
+          tmp_qga=$(mktemp)
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=QEMU Guest Agent' \
+            'ConditionPathExists=/dev/virtio-ports/org.qemu.guest_agent.0' \
+            'After=dev-virtio\x2dports-org.qemu.guest_agent.0.device' \
+            ' ' \
+            '[Service]' \
+            "ExecStart=$qga_bin -m virtio-serial -p /dev/virtio-ports/org.qemu.guest_agent.0" \
+            'Restart=always' \
+            'RestartSec=5' \
+            ' ' \
+            '[Install]' \
+            'WantedBy=multi-user.target' \
+            > "$tmp_qga"
+          if ! cmp -s "$tmp_qga" "$qga_svc"; then
+            install -m 644 "$tmp_qga" "$qga_svc"
+            systemctl daemon-reload
+            systemctl enable qemu-guest-agent.service 2>/dev/null
+            systemctl restart qemu-guest-agent.service 2>/dev/null || true
+            echo "activate-persistent-fixes: qemu-guest-agent unit updated + restarted"
+          elif ! systemctl is-active --quiet qemu-guest-agent.service; then
+            systemctl start qemu-guest-agent.service 2>/dev/null || true
+            echo "activate-persistent-fixes: qemu-guest-agent was inactive, started"
+          fi
+          rm -f "$tmp_qga"
+          echo "activate-persistent-fixes: qemu-guest-agent enabled (binary=$qga_bin)"
+        fi
 
         steamos-readonly enable
         echo "activate-persistent-fixes: done"

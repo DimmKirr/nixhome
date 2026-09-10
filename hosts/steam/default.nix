@@ -485,8 +485,9 @@ in
           '# 1. Stop audio server (releases snd_hda_intel on HDMI audio)' \
           'log "stopping audio"' \
           'su - deck -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop pipewire pipewire-pulse wireplumber" 2>/dev/null' \
+          'sleep 2' \
           'su - deck -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop pulseaudio" 2>/dev/null' \
-          'sleep 1' \
+          'sleep 2' \
           ' ' \
           '# 2. Stop display server (releases DRM master fd)' \
           '# sddm manages the gamescope session: stopping sddm is what' \
@@ -501,7 +502,7 @@ in
           '  log "unbinding $AUDIO from $drv"' \
           '  echo $AUDIO > /sys/bus/pci/devices/$AUDIO/driver/unbind 2>/dev/null' \
           'fi' \
-          'sleep 1' \
+          'sleep 2' \
           ' ' \
           '# 4. Unbind amdgpu (triggers amdgpu_device_fini -> PSP cleanup)' \
           'if [ -e /sys/bus/pci/devices/$GPU/driver ]; then' \
@@ -514,6 +515,7 @@ in
           '# 5. Remove from PCI tree (NO bus reset!)' \
           'log "removing devices from PCI tree"' \
           '[ -d /sys/bus/pci/devices/$AUDIO ] && echo 1 > /sys/bus/pci/devices/$AUDIO/remove 2>/dev/null' \
+          'sleep 2' \
           '[ -d /sys/bus/pci/devices/$GPU ] && echo 1 > /sys/bus/pci/devices/$GPU/remove 2>/dev/null' \
           ' ' \
           'log "teardown complete"' \

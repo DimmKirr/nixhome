@@ -70,6 +70,7 @@ in
       go-task
       fzf
       qemu_kvm.ga  # qemu-ga; system unit installed by activate-persistent-fixes
+      acpid        # power-button -> switch-steamos-mode; unit installed by activate-persistent-fixes
       yazi
       nettools
 
@@ -301,6 +302,29 @@ in
       '';
     };
 
+    # acpid config lives on /home (survives OS updates); the acpid.service
+    # unit installed by activate-persistent-fixes points here via -c.
+    file.".config/acpi/events/power-button".text = ''
+      event=button/power.*
+      action=/home/deck/.local/bin/acpi-power-action %e
+    '';
+
+    # Runs as root from acpid on a single power-button press. Dispatches
+    # switch-steamos-mode as deck; flock drops presses while a switch is
+    # already in flight (a switch can take 60s+).
+    file.".local/bin/acpi-power-action" = {
+      executable = true;
+      text = ''
+        #!/bin/bash
+        set -u
+        exec >>/tmp/acpi-power-action.log 2>&1
+        echo "=== $(date -Is) event: $*"
+        flock -n /run/acpi-power-action.lock \
+          su deck -c 'XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus /home/deck/.local/bin/switch-steamos-mode' \
+          || echo "skipped: switch already in progress"
+      '';
+    };
+
     file.".local/bin/activate-persistent-fixes" = {
       executable = true;
       text = ''
@@ -382,6 +406,8 @@ in
           'systemd/system/plugin_loader.service' \
           'systemd/system/k3s-agent.service' \
           'systemd/system/qemu-guest-agent.service' \
+          'systemd/system/acpid.service' \
+          'systemd/logind.conf.d/zz-power-key-ignore.conf' \
           > /etc/atomic-update.conf.d/keep-persistent-fixes.conf
 
         # --- 4. amdgpu module params (FRL + DSC + FreeSync + deep color) ---
@@ -543,7 +569,50 @@ in
         fi
         rm -f "$tmp_decky"
 
-        # --- 10. QEMU Guest Agent (Proxmox VM integration) ---
+        # --- 10. acpid (power button -> switch-steamos-mode) ---
+        # SteamOS ships HandlePowerKey=ignore (suspendbutton.conf) and nothing
+        # holds a handle-power-key inhibitor, so acpid is the sole handler.
+        # Event/action files live on /home (HM-managed); acpid runs with -c
+        # pointing there so nothing in /etc but the unit needs keeplisting.
+        logind_dropin=/etc/systemd/logind.conf.d/zz-power-key-ignore.conf
+        if [ ! -f "$logind_dropin" ]; then
+          printf '[Login]\nHandlePowerKey=ignore\n' > "$logind_dropin"
+          echo "activate-persistent-fixes: logind power-key drop-in installed"
+        fi
+        acpid_bin=$(readlink -f /home/deck/.nix-profile/bin/acpid 2>/dev/null || readlink -f /home/deck/.local/state/nix/profiles/profile/bin/acpid 2>/dev/null || true)
+        if [ -z "$acpid_bin" ] || [ ! -x "$acpid_bin" ]; then
+          echo "activate-persistent-fixes: SKIP acpid (nix acpid binary not found)"
+        else
+          acpid_svc=/etc/systemd/system/acpid.service
+          tmp_acpid=$(mktemp)
+          printf '%s\n' \
+            '[Unit]' \
+            'Description=ACPI event daemon (power button -> switch-steamos-mode)' \
+            'After=basic.target' \
+            ' ' \
+            '[Service]' \
+            "ExecStart=$acpid_bin -f -c /home/deck/.config/acpi/events" \
+            'Restart=always' \
+            'RestartSec=5' \
+            ' ' \
+            '[Install]' \
+            'WantedBy=multi-user.target' \
+            > "$tmp_acpid"
+          if ! cmp -s "$tmp_acpid" "$acpid_svc"; then
+            install -m 644 "$tmp_acpid" "$acpid_svc"
+            systemctl daemon-reload
+            systemctl enable acpid.service 2>/dev/null
+            systemctl restart acpid.service 2>/dev/null || true
+            echo "activate-persistent-fixes: acpid unit updated + restarted"
+          elif ! systemctl is-active --quiet acpid.service; then
+            systemctl start acpid.service 2>/dev/null || true
+            echo "activate-persistent-fixes: acpid was inactive, started"
+          fi
+          rm -f "$tmp_acpid"
+          echo "activate-persistent-fixes: acpid enabled (binary=$acpid_bin)"
+        fi
+
+        # --- 11. QEMU Guest Agent (Proxmox VM integration) ---
         qga_bin=$(readlink -f /home/deck/.nix-profile/bin/qemu-ga 2>/dev/null || readlink -f /home/deck/.local/state/nix/profiles/profile/bin/qemu-ga 2>/dev/null || true)
         if [ -z "$qga_bin" ] || [ ! -x "$qga_bin" ]; then
           echo "activate-persistent-fixes: SKIP qemu-guest-agent (nix qemu-ga binary not found)"

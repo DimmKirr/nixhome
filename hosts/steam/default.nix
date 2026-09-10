@@ -444,11 +444,20 @@ in
         # --- 8. K3s Agent ---
         k3s_env=/home/deck/.config/k3s/env.local
         k3s_svc=/etc/systemd/system/k3s-agent.service
+        k3s_node_pw=/home/deck/.config/k3s/node-password
+        k3s_node_pw_etc=/etc/rancher/node/password
         if [ -f "$k3s_env" ] && grep -q '^K3S_TOKEN=' "$k3s_env" 2>/dev/null; then
           k3s_bin=$(readlink -f /home/deck/.local/state/nix/profiles/profile/bin/k3s 2>/dev/null || true)
           if [ -z "$k3s_bin" ] || [ ! -x "$k3s_bin" ]; then
             echo "activate-persistent-fixes: SKIP k3s-agent (nix k3s binary not found)"
           else
+            # Symlink node password to persistent location (SteamOS updates wipe /etc/rancher/)
+            mkdir -p "$(dirname "$k3s_node_pw_etc")"
+            if [ -f "$k3s_node_pw" ]; then
+              ln -sf "$k3s_node_pw" "$k3s_node_pw_etc"
+              echo "activate-persistent-fixes: k3s node password symlinked"
+            fi
+
             tmp_k3s=$(mktemp)
             printf '%s\n' \
               '[Unit]' \
@@ -666,12 +675,44 @@ in
     zoxide   = import ../../home/programs/zoxide.nix   { inherit pkgs; };
     bash = {
       enable = true;
+      initExtra = ''
+        _steamos_upgrade_check() {
+          local warn=()
+          sudo -n true 2>/dev/null || warn+=("NOPASSWD sudo broken")
+          systemctl is-enabled activate-persistent-fixes.service >/dev/null 2>&1 || warn+=("boot service missing")
+          [ -L /etc/rancher/node/password ] || [ ! -f /home/deck/.config/k3s/node-password ] || warn+=("k3s node password symlink missing")
+          local dc; dc=$(cat /sys/module/amdgpu/parameters/dcfeaturemask 2>/dev/null)
+          [ "$dc" = "1050" ] || warn+=("amdgpu params stale (reboot needed)")
+          if [ ''${#warn[@]} -gt 0 ]; then
+            printf '\n\033[1;31m*** SteamOS update detected ***\033[0m\n'
+            printf '  - %s\n' "''${warn[@]}"
+            printf 'Fix: passwd && sudo ~/.local/bin/activate-persistent-fixes\n\n'
+          fi
+        }
+        _steamos_upgrade_check
+      '';
       shellAliases = {
         sudo = ''sudo env PATH="$PATH"'';
         hms = "cd ~/.config/home-manager && git pull && find ~ -maxdepth 5 -name '*.backup*' -delete 2>/dev/null; home-manager switch --flake .#steam -b backup && find ~ -maxdepth 5 -name '*.backup' -delete 2>/dev/null";
       };
     };
     zsh      = (import ../../home/programs/zsh.nix      { inherit pkgs pkgsUnstable; }) // {
+      initExtra = ''
+        _steamos_upgrade_check() {
+          local warn=()
+          sudo -n true 2>/dev/null || warn+=("NOPASSWD sudo broken")
+          systemctl is-enabled activate-persistent-fixes.service >/dev/null 2>&1 || warn+=("boot service missing")
+          [ -L /etc/rancher/node/password ] || [ ! -f /home/deck/.config/k3s/node-password ] || warn+=("k3s node password symlink missing")
+          local dc; dc=$(cat /sys/module/amdgpu/parameters/dcfeaturemask 2>/dev/null)
+          [ "$dc" = "1050" ] || warn+=("amdgpu params stale (reboot needed)")
+          if [ ''${#warn[@]} -gt 0 ]; then
+            printf '\n\033[1;31m*** SteamOS update detected ***\033[0m\n'
+            printf '  - %s\n' "''${warn[@]}"
+            printf 'Fix: passwd && sudo ~/.local/bin/activate-persistent-fixes\n\n'
+          fi
+        }
+        _steamos_upgrade_check
+      '';
       shellAliases.sudo = ''sudo env PATH="$PATH"'';
       shellAliases.hms = "cd ~/.config/home-manager && git pull && find ~ -maxdepth 5 -name '*.backup*' -delete 2>/dev/null; home-manager switch --flake .#steam -b backup && find ~ -maxdepth 5 -name '*.backup' -delete 2>/dev/null";
     };

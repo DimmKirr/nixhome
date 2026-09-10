@@ -535,6 +535,13 @@ in
           chmod 755 "$decky_bin"
           chown -R deck:deck /home/deck/homebrew
         fi
+        # Steam updates wipe this flag; without it Steam keeps its CEF debug
+        # port closed and Decky can't inject into the UI (wsrouter warnings).
+        cef_flag=/home/deck/.local/share/Steam/.cef-enable-remote-debugging
+        if [ ! -f "$cef_flag" ]; then
+          install -o deck -g deck /dev/null "$cef_flag"
+          echo "activate-persistent-fixes: restored .cef-enable-remote-debugging (restart Steam to apply)"
+        fi
         decky_svc=/etc/systemd/system/plugin_loader.service
         tmp_decky=$(mktemp)
         printf '%s\n' \

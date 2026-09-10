@@ -421,6 +421,7 @@ in
           'atomic-update.conf.d/keep-persistent-fixes.conf' \
           'modprobe.d/amdgpu-4k120.conf' \
           'systemd/system/gpu-teardown.service' \
+          'gpu-teardown.sh' \
           'systemd/system/plugin_loader.service' \
           'systemd/system/k3s-agent.service' \
           'systemd/system/qemu-guest-agent.service' \
@@ -437,29 +438,105 @@ in
           echo "activate-persistent-fixes: modprobe.d updated (reboot required)"
         fi
 
-        # --- 5. GPU teardown service (NMD-299: clean release before shutdown) ---
+        # --- 5. GPU teardown service (NMD-299 v3: clean release, RadeonResetBugFix pattern) ---
+        # Teardown logic lives in /etc/gpu-teardown.sh (keeplisted): a single
+        # ExecStart with line continuations cannot carry comments, since
+        # systemd joins continued lines and the first '#' would comment out
+        # the rest of the command.
+        gpu_sh=/etc/gpu-teardown.sh
+        tmp_gpush=$(mktemp)
+        printf '%s\n' \
+          '#!/bin/bash' \
+          '# gpu-teardown v3: clean GPU release before shutdown' \
+          '# Mirrors RadeonResetBugFix (Windows) logic for Linux/SteamOS:' \
+          '#   1. Stop audio (release HDMI audio device)' \
+          '#   2. Stop display server (release DRM master / framebuffer)' \
+          '#   3. Unbind HDMI audio driver' \
+          '#   4. Unbind amdgpu (triggers amdgpu_device_fini -> PSP fini -> SMU fini)' \
+          '#   5. Remove devices from PCI tree (NO bus reset!)' \
+          '#' \
+          '# The bus reset (echo 1 > .../reset) in v2 is REMOVED: it triggers a' \
+          '# sync flood on Phoenix3 because the PSP/SMU are still live after a' \
+          '# dirty unbind. The proper fix is to let amdgpu_device_fini clean up' \
+          '# PSP state, then remove the device without resetting it.' \
+          ' ' \
+          'GPU=0000:01:00.0' \
+          'AUDIO=0000:01:00.1' \
+          'log() { echo "gpu-teardown: $1" | systemd-cat -t gpu-teardown; echo "$1"; }' \
+          ' ' \
+          'log "=== v3 shutdown teardown ==="' \
+          ' ' \
+          '# 1. Stop audio server (releases snd_hda_intel on HDMI audio)' \
+          'log "stopping audio"' \
+          'su - deck -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop pipewire pipewire-pulse wireplumber" 2>/dev/null' \
+          'su - deck -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop pulseaudio" 2>/dev/null' \
+          'sleep 1' \
+          ' ' \
+          '# 2. Stop display server (releases DRM master fd)' \
+          '# sddm manages the gamescope session: stopping sddm is what' \
+          '# actually kills gamescope (no separate gamescope-session unit)' \
+          'log "stopping display server"' \
+          'systemctl stop sddm.service 2>/dev/null' \
+          'sleep 2' \
+          ' ' \
+          '# 3. Unbind HDMI audio first' \
+          'if [ -e /sys/bus/pci/devices/$AUDIO/driver ]; then' \
+          '  drv=$(basename "$(readlink /sys/bus/pci/devices/$AUDIO/driver)")' \
+          '  log "unbinding $AUDIO from $drv"' \
+          '  echo $AUDIO > /sys/bus/pci/devices/$AUDIO/driver/unbind 2>/dev/null' \
+          'fi' \
+          'sleep 1' \
+          ' ' \
+          '# 4. Unbind amdgpu (triggers amdgpu_device_fini -> PSP cleanup)' \
+          'if [ -e /sys/bus/pci/devices/$GPU/driver ]; then' \
+          '  drv=$(basename "$(readlink /sys/bus/pci/devices/$GPU/driver)")' \
+          '  log "unbinding $GPU from $drv"' \
+          '  echo $GPU > /sys/bus/pci/devices/$GPU/driver/unbind 2>/dev/null' \
+          'fi' \
+          'sleep 2' \
+          ' ' \
+          '# 5. Remove from PCI tree (NO bus reset!)' \
+          'log "removing devices from PCI tree"' \
+          '[ -d /sys/bus/pci/devices/$AUDIO ] && echo 1 > /sys/bus/pci/devices/$AUDIO/remove 2>/dev/null' \
+          '[ -d /sys/bus/pci/devices/$GPU ] && echo 1 > /sys/bus/pci/devices/$GPU/remove 2>/dev/null' \
+          ' ' \
+          'log "teardown complete"' \
+          'exit 0' \
+          > "$tmp_gpush"
+
         gpu_svc=/etc/systemd/system/gpu-teardown.service
         tmp_gpu=$(mktemp)
         printf '%s\n' \
           '[Unit]' \
-          'Description=Release GPU before shutdown' \
+          'Description=Release GPU before shutdown (v3: full teardown)' \
           'DefaultDependencies=no' \
           'Before=shutdown.target reboot.target halt.target' \
+          'After=sddm.service' \
           ' ' \
           '[Service]' \
           'Type=oneshot' \
-          'ExecStart=/bin/bash -c "echo 0000:01:00.0 > /sys/bus/pci/drivers/amdgpu/unbind 2>/dev/null; echo 1 > /sys/bus/pci/devices/0000:01:00.0/reset; sleep 1; echo 1 > /sys/bus/pci/devices/0000:01:00.0/remove"' \
+          'TimeoutStartSec=60' \
+          'ExecStart=/bin/bash /etc/gpu-teardown.sh' \
           ' ' \
           '[Install]' \
           'WantedBy=shutdown.target reboot.target halt.target' \
           > "$tmp_gpu"
+
+        gpu_changed=0
+        if ! cmp -s "$tmp_gpush" "$gpu_sh"; then
+          install -m 755 "$tmp_gpush" "$gpu_sh"
+          gpu_changed=1
+        fi
         if ! cmp -s "$tmp_gpu" "$gpu_svc"; then
           install -m 644 "$tmp_gpu" "$gpu_svc"
+          gpu_changed=1
+        fi
+        if [ "$gpu_changed" = 1 ]; then
           systemctl daemon-reload
           systemctl enable gpu-teardown.service 2>/dev/null
-          echo "activate-persistent-fixes: gpu-teardown unit updated"
+          echo "activate-persistent-fixes: gpu-teardown v3 updated"
         fi
-        rm -f "$tmp_gpu"
+        rm -f "$tmp_gpu" "$tmp_gpush"
 
         # --- 6. Install Lua display profile as a plain file ---
         # gamescope reads this before /nix is reliably mounted, so the real

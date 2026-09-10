@@ -236,27 +236,55 @@ in
         #!/bin/bash
         set -euo pipefail
 
+        dbg() { echo "switch-steamos-mode: [debug] $*" >&2; }
+
+        dbg "processes: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0) kwin=$(pgrep -cx kwin_wayland || echo 0)"
+        dbg "sddm: $(systemctl is-active sddm 2>/dev/null || echo unknown)"
+        dbg "session sentinel: $(cat ~/.local/state/steamos-session-select 2>/dev/null || echo missing)"
+        dbg "steamos-manager: $(systemctl is-active steamos-manager 2>/dev/null || echo unknown)"
+
         if pgrep -x gamescope >/dev/null; then
           current=game; target=desktop
-          switch() { steamosctl switch-to-desktop-mode || steamos-session-select plasma; }
           stop=gamescope start=plasmashell
         elif pgrep -x plasmashell >/dev/null; then
           current=desktop; target=game
-          switch() { steamosctl switch-to-game-mode || steamos-session-select gamescope; }
           stop=plasmashell start=gamescope
         else
           echo "switch-steamos-mode: neither gamescope nor plasmashell running, defaulting to game mode" >&2
           current=none; target=game
-          switch() { steamosctl switch-to-game-mode || steamos-session-select gamescope; }
           stop="" start=gamescope
         fi
 
         echo "switch-steamos-mode: $current -> $target"
-        switch
+
+        if [ "$target" = "desktop" ]; then
+          dbg "trying: steamosctl switch-to-desktop-mode"
+          if steamosctl switch-to-desktop-mode 2>&1; then
+            dbg "steamosctl succeeded"
+          else
+            rc=$?
+            dbg "steamosctl failed (rc=$rc), falling back to steamos-session-select plasma"
+            steamos-session-select plasma 2>&1 || dbg "steamos-session-select also failed (rc=$?)"
+          fi
+        else
+          dbg "trying: steamosctl switch-to-game-mode"
+          if steamosctl switch-to-game-mode 2>&1; then
+            dbg "steamosctl succeeded"
+          else
+            rc=$?
+            dbg "steamosctl failed (rc=$rc), falling back to steamos-session-select gamescope"
+            steamos-session-select gamescope 2>&1 || dbg "steamos-session-select also failed (rc=$?)"
+          fi
+        fi
+
+        dbg "post-switch sentinel: $(cat ~/.local/state/steamos-session-select 2>/dev/null || echo missing)"
         sleep 3
+        dbg "post-sleep processes: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0)"
+
         # If the old session is still up, restart sddm as the fallback of last resort
         if [ -n "$stop" ] && pgrep -x "$stop" >/dev/null; then
-          sudo systemctl restart sddm || true
+          dbg "$stop still running, restarting sddm"
+          sudo systemctl restart sddm 2>&1 || dbg "sddm restart failed (rc=$?)"
         fi
 
         for i in $(seq 1 60); do
@@ -265,6 +293,9 @@ in
           sleep 1
         done
         echo ""
+        dbg "final state: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0) sddm=$(systemctl is-active sddm 2>/dev/null || echo unknown)"
+        dbg "sddm journal (last 10):"
+        sudo journalctl -u sddm -n 10 --no-pager 2>&1 | sed 's/^/  /' >&2
         echo "timed out waiting for $start" >&2
         exit 1
       '';

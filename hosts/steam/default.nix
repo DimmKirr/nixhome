@@ -188,6 +188,22 @@ in
       }
     '';
 
+    # Apply the system-level persistent fixes immediately on `home-manager
+    # switch` instead of waiting for the next boot (watchdog) or a manual run.
+    # Needs the NOPASSWD sudoers rule the script itself installs; on first
+    # bootstrap (rule not yet present) it just prints the manual command.
+    activation.runPersistentFixes = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+      fixes=/home/deck/.local/bin/activate-persistent-fixes
+      if [ -x "$fixes" ]; then
+        if sudo -n true 2>/dev/null; then
+          run sudo -n "$fixes" || \
+            warnEcho "activate-persistent-fixes failed — run manually: sudo ~/.local/bin/activate-persistent-fixes"
+        else
+          warnEcho "sudo NOPASSWD not active — run manually: sudo ~/.local/bin/activate-persistent-fixes"
+        fi
+      fi
+    '';
+
     file.".config/environment.d/10-nix.conf".text = ''
       PATH=$PATH:$HOME/.local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin
       TMPDIR=/home/deck/.tmp
@@ -421,7 +437,6 @@ in
           'atomic-update.conf.d/keep-persistent-fixes.conf' \
           'modprobe.d/amdgpu-4k120.conf' \
           'systemd/system/gpu-teardown.service' \
-          'gpu-teardown.sh' \
           'systemd/system/plugin_loader.service' \
           'systemd/system/k3s-agent.service' \
           'systemd/system/qemu-guest-agent.service' \
@@ -439,11 +454,12 @@ in
         fi
 
         # --- 5. GPU teardown service (NMD-299 v3: clean release, RadeonResetBugFix pattern) ---
-        # Teardown logic lives in /etc/gpu-teardown.sh (keeplisted): a single
-        # ExecStart with line continuations cannot carry comments, since
-        # systemd joins continued lines and the first '#' would comment out
-        # the rest of the command.
-        gpu_sh=/etc/gpu-teardown.sh
+        # Teardown logic lives in a separate script: a single ExecStart with
+        # line continuations cannot carry comments, since systemd joins
+        # continued lines and the first '#' would comment out the rest of the
+        # command. Stored under /home/deck (not /etc) because SteamOS updates
+        # overwrite /etc; /home survives them.
+        gpu_sh=/home/deck/.local/bin/gpu-teardown.sh
         tmp_gpush=$(mktemp)
         printf '%s\n' \
           '#!/bin/bash' \
@@ -516,7 +532,7 @@ in
           '[Service]' \
           'Type=oneshot' \
           'TimeoutStartSec=60' \
-          'ExecStart=/bin/bash /etc/gpu-teardown.sh' \
+          'ExecStart=/bin/bash /home/deck/.local/bin/gpu-teardown.sh' \
           ' ' \
           '[Install]' \
           'WantedBy=shutdown.target reboot.target halt.target' \
@@ -524,7 +540,7 @@ in
 
         gpu_changed=0
         if ! cmp -s "$tmp_gpush" "$gpu_sh"; then
-          install -m 755 "$tmp_gpush" "$gpu_sh"
+          install -m 755 -o deck -g deck "$tmp_gpush" "$gpu_sh"
           gpu_changed=1
         fi
         if ! cmp -s "$tmp_gpu" "$gpu_svc"; then
@@ -537,6 +553,7 @@ in
           echo "activate-persistent-fixes: gpu-teardown v3 updated"
         fi
         rm -f "$tmp_gpu" "$tmp_gpush"
+        rm -f /etc/gpu-teardown.sh  # stale pre-v3.1 location (/etc is wiped by SteamOS updates)
 
         # --- 6. Install Lua display profile as a plain file ---
         # gamescope reads this before /nix is reliably mounted, so the real

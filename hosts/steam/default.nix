@@ -754,7 +754,7 @@ in
       initExtra = ''
         _steamos_upgrade_check() {
           local warn=()
-          sudo -n true 2>/dev/null || warn+=("NOPASSWD sudo broken")
+          command sudo -n true 2>/dev/null || warn+=("NOPASSWD sudo broken")
           systemctl is-enabled activate-persistent-fixes.service >/dev/null 2>&1 || warn+=("boot service missing")
           [ -L /etc/rancher/node/password ] || [ ! -f /home/deck/.config/k3s/node-password ] || warn+=("k3s node password symlink missing")
           local dc; dc=$(cat /sys/module/amdgpu/parameters/dcfeaturemask 2>/dev/null)
@@ -776,7 +776,7 @@ in
       initExtra = ''
         _steamos_upgrade_check() {
           local warn=()
-          sudo -n true 2>/dev/null || warn+=("NOPASSWD sudo broken")
+          command sudo -n true 2>/dev/null || warn+=("NOPASSWD sudo broken")
           systemctl is-enabled activate-persistent-fixes.service >/dev/null 2>&1 || warn+=("boot service missing")
           [ -L /etc/rancher/node/password ] || [ ! -f /home/deck/.config/k3s/node-password ] || warn+=("k3s node password symlink missing")
           local dc; dc=$(cat /sys/module/amdgpu/parameters/dcfeaturemask 2>/dev/null)

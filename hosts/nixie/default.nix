@@ -110,6 +110,9 @@
   # Docker
   virtualisation.docker.enable = true;
 
+  # QEMU guest agent (Proxmox VM integration: IP in UI, clean shutdown, fsfreeze)
+  services.qemuGuest.enable = true;
+
   # Nix settings
   nix = {
     enable = true;

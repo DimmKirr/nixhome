@@ -553,6 +553,32 @@ in
           chmod 755 "$decky_bin"
           chown -R deck:deck /home/deck/homebrew
         fi
+        # decky-gfn plugin (github.com/DimmKirr/decky-gfn)
+        gfn_plugin_dir=/home/deck/homebrew/plugins/decky-gfn
+        if [ ! -d "$gfn_plugin_dir" ]; then
+          unzip_bin=$(readlink -f /home/deck/.nix-profile/bin/unzip 2>/dev/null || command -v unzip || true)
+          if [ -z "$unzip_bin" ] || [ ! -x "$unzip_bin" ]; then
+            echo "activate-persistent-fixes: SKIP decky-gfn (unzip not found)"
+          else
+            echo "activate-persistent-fixes: installing decky-gfn plugin"
+            tmp_gfn=$(mktemp -d)
+            if curl -fsSL https://github.com/DimmKirr/decky-gfn/releases/latest/download/decky-gfn.zip -o "$tmp_gfn/decky-gfn.zip" \
+               && "$unzip_bin" -q "$tmp_gfn/decky-gfn.zip" -d "$tmp_gfn/extract"; then
+              mkdir -p /home/deck/homebrew/plugins
+              if [ -d "$tmp_gfn/extract/decky-gfn" ]; then
+                mv "$tmp_gfn/extract/decky-gfn" "$gfn_plugin_dir"
+              else
+                mv "$tmp_gfn/extract" "$gfn_plugin_dir"
+              fi
+              chown -R deck:deck /home/deck/homebrew/plugins
+              systemctl try-restart plugin_loader.service 2>/dev/null || true
+              echo "activate-persistent-fixes: decky-gfn installed"
+            else
+              echo "activate-persistent-fixes: SKIP decky-gfn (download/unzip failed)"
+            fi
+            rm -rf "$tmp_gfn"
+          fi
+        fi
         # Steam updates wipe this flag; without it Steam keeps its CEF debug
         # port closed and Decky can't inject into the UI (wsrouter warnings).
         cef_flag=/home/deck/.local/share/Steam/.cef-enable-remote-debugging

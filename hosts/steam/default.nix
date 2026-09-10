@@ -239,7 +239,9 @@ in
 
         dbg() { echo "switch-steamos-mode: [debug] $*" >&2; }
 
-        dbg "processes: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0) kwin=$(pgrep -cx kwin_wayland || echo 0)"
+        # pgrep -c prints the count itself (0 on no match) — no `|| echo 0`,
+        # that double-printed "0\n0" into the debug lines.
+        dbg "processes: gamescope=$(pgrep -cx gamescope || true) plasmashell=$(pgrep -cx plasmashell || true) kwin=$(pgrep -cx kwin_wayland || true)"
         dbg "sddm: $(systemctl is-active sddm 2>/dev/null || echo unknown)"
         dbg "session sentinel: $(cat ~/.local/state/steamos-session-select 2>/dev/null || echo missing)"
         dbg "steamos-manager: $(systemctl is-active steamos-manager 2>/dev/null || echo unknown)"
@@ -247,9 +249,10 @@ in
         if pgrep -x gamescope >/dev/null; then
           current=game; target=desktop
           stop=gamescope start=plasmashell
-        elif pgrep -x plasmashell >/dev/null; then
+        elif pgrep -x plasmashell >/dev/null || pgrep -x kwin_wayland >/dev/null; then
+          # kwin can be up while plasmashell crashed/restarts — still desktop
           current=desktop; target=game
-          stop=plasmashell start=gamescope
+          stop=kwin_wayland start=gamescope
         else
           echo "switch-steamos-mode: neither gamescope nor plasmashell running, defaulting to game mode" >&2
           current=none; target=game
@@ -282,14 +285,29 @@ in
         sleep 3
         dbg "post-sleep processes: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0)"
 
-        # If the old session is still up, restart sddm as the fallback of last resort
-        if [ -n "$stop" ] && pgrep -x "$stop" >/dev/null; then
-          dbg "$stop still running, restarting sddm"
+        restart_sddm() {
+          dbg "restarting sddm ($1)"
           sudo systemctl restart sddm 2>&1 || dbg "sddm restart failed (rc=$?)"
+        }
+
+        # If the old session is still up, restart sddm as the fallback of last resort
+        sddm_restarted=0
+        if [ -n "$stop" ] && pgrep -x "$stop" >/dev/null; then
+          restart_sddm "$stop still running"
+          sddm_restarted=1
         fi
 
         for i in $(seq 1 60); do
-          pgrep -x "$start" >/dev/null && { echo "$start is up"; exit 0; }
+          pgrep -x "$start" >/dev/null && { echo ""; echo "$start is up"; exit 0; }
+          # steamosctl can report success without the session ever launching
+          # (observed from the none->game path: sddm stays on whatever it had).
+          # If nothing came up after 15s, kick sddm once so it relaunches the
+          # newly selected session.
+          if [ "$i" -eq 15 ] && [ "$sddm_restarted" -eq 0 ]; then
+            echo ""
+            restart_sddm "$start not up after 15s"
+            sddm_restarted=1
+          fi
           printf '\rwaiting: %s starting (%ss)' "$start" "$i"
           sleep 1
         done

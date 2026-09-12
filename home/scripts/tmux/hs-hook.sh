@@ -24,6 +24,7 @@ case "$SESSION" in
   HOME)  "$HS" send start-project --project_id 3727679 >/dev/null 2>&1 ;;
   HZL)   "$HS" send start-project --project_id 3497760 >/dev/null 2>&1 ;;
   I)     "$HS" send start-project --project_id 4097848 >/dev/null 2>&1 ;;
+  IMI)   "$HS" send start-project --project_id 4205957 >/dev/null 2>&1 ;;
   IOT)   "$HS" send start-project --project_id 3984316 >/dev/null 2>&1 ;;
   KIRR)  "$HS" send start-project --project_id 3956771 >/dev/null 2>&1 ;;
   KIWA)  "$HS" send start-project --project_id 3979463 >/dev/null 2>&1 ;;

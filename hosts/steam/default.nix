@@ -194,9 +194,13 @@ in
     # bootstrap (rule not yet present) it just prints the manual command.
     activation.runPersistentFixes = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
       fixes=/home/deck/.local/bin/activate-persistent-fixes
-      if [ -x "$fixes" ]; then
-        if sudo -n true 2>/dev/null; then
-          run sudo -n "$fixes" || \
+      # activation runs with a nix-only PATH — /usr/bin isn't on it, so a bare
+      # `sudo` is "command not found" and reads as a false NOPASSWD failure
+      sudoBin=/usr/bin/sudo
+      [ -x "$sudoBin" ] || sudoBin=$(command -v sudo || true)
+      if [ -x "$fixes" ] && [ -n "$sudoBin" ]; then
+        if "$sudoBin" -n true 2>/dev/null; then
+          run "$sudoBin" -n "$fixes" || \
             warnEcho "activate-persistent-fixes failed — run manually: sudo ~/.local/bin/activate-persistent-fixes"
         else
           warnEcho "sudo NOPASSWD not active — run manually: sudo ~/.local/bin/activate-persistent-fixes"
@@ -436,6 +440,7 @@ in
           'sudoers.d/zz-deck-nopasswd' \
           'atomic-update.conf.d/keep-persistent-fixes.conf' \
           'modprobe.d/amdgpu-4k120.conf' \
+          'modprobe.d/blacklist-acp-vm.conf' \
           'systemd/system/gpu-teardown.service' \
           'systemd/system/plugin_loader.service' \
           'systemd/system/k3s-agent.service' \
@@ -453,6 +458,29 @@ in
           echo "activate-persistent-fixes: modprobe.d updated (reboot required)"
         fi
 
+        # --- 4b. ACP blacklist (snd_pci_ps crashes the kernel on unbind) ---
+        # ACP coprocessor 03:00.0 (1022:15e2) must never bind a driver: the
+        # snd_pci_ps unbind at shutdown took the kernel down twice
+        # (2026-09-10/11), turning poweroff into a reboot. gpu-teardown v3.5
+        # no longer touches it; this makes sure there's nothing to touch.
+        acp_conf=/etc/modprobe.d/blacklist-acp-vm.conf
+        tmp_acp=$(mktemp)
+        printf '%s\n' \
+          '# VM 500 passthrough: ACP (03:00.0, 1022:15e2) must stay driverless.' \
+          '# snd_pci_ps unbind at shutdown crashes the kernel -> poweroff becomes reboot.' \
+          'blacklist snd_pci_ps' \
+          'blacklist snd_sof_amd_acp63' \
+          'blacklist snd_sof_amd_acp70' \
+          'blacklist snd_pci_acp6x' \
+          'blacklist snd_pci_acp5x' \
+          > "$tmp_acp"
+        if ! cmp -s "$tmp_acp" "$acp_conf"; then
+          install -m 644 "$tmp_acp" "$acp_conf"
+          changed=1
+          echo "activate-persistent-fixes: ACP blacklist updated (reboot required)"
+        fi
+        rm -f "$tmp_acp"
+
         # --- 5. GPU teardown service (NMD-299 v3: clean release, RadeonResetBugFix pattern) ---
         # Teardown logic lives in a separate script: a single ExecStart with
         # line continuations cannot carry comments, since systemd joins
@@ -463,24 +491,61 @@ in
         tmp_gpush=$(mktemp)
         printf '%s\n' \
           '#!/bin/bash' \
-          '# gpu-teardown v3: clean GPU release before shutdown' \
-          '# Mirrors RadeonResetBugFix (Windows) logic for Linux/SteamOS:' \
-          '#   1. Stop audio (release HDMI audio device)' \
-          '#   2. Stop display server (release DRM master / framebuffer)' \
-          '#   3. Unbind HDMI audio driver' \
-          '#   4. Unbind amdgpu (triggers amdgpu_device_fini -> PSP fini -> SMU fini)' \
-          '#   5. Remove devices from PCI tree (NO bus reset!)' \
+          '# gpu-teardown v3.5: clean release of the GPU pair before shutdown.' \
+          '# Mirrors RadeonResetBugFix (Windows) logic:' \
+          '#   1. Stop audio + display server (release audio device + DRM master)' \
+          '#   2. Unbind HDMI audio (01:00.1), then amdgpu (01:00.0) —' \
+          '#      amdgpu_device_fini -> PSP/SMU fini is the whole point' \
+          '#   3. Remove both from the PCI tree (NO bus reset!)' \
+          '#' \
+          '# v3.4 -> v3.5: ACP (03:00.0) and USB (04:00.0) are NOT touched at' \
+          '# all. The snd_pci_ps unbind does not just hang the write — it took' \
+          '# the guest kernel down mid-shutdown (persistent log stopped at that' \
+          '# line on 2026-09-10 23:36 AND 2026-09-11 07:48; the guest came back' \
+          '# ~15s later as a REBOOT). A timeout guard cannot survive a kernel' \
+          '# crash, and a shutdown-turned-reboot means QEMU never exits, the VM' \
+          '# never stops, and the host post-stop hookscript (remove/rescan)' \
+          '# never runs. ACP stays driverless via the modprobe blacklist' \
+          '# installed in step 4b — nothing to unbind.' \
           '#' \
           '# The bus reset (echo 1 > .../reset) in v2 is REMOVED: it triggers a' \
           '# sync flood on Phoenix3 because the PSP/SMU are still live after a' \
-          '# dirty unbind. The proper fix is to let amdgpu_device_fini clean up' \
-          '# PSP state, then remove the device without resetting it.' \
+          '# dirty unbind.' \
           ' ' \
-          'GPU=0000:01:00.0' \
-          'AUDIO=0000:01:00.1' \
-          'log() { echo "gpu-teardown: $1" | systemd-cat -t gpu-teardown; echo "$1"; }' \
+          'GPU=0000:01:00.0    # 1002:1900' \
+          'AUDIO=0000:01:00.1  # 1002:1640 HDMI audio' \
+          '# journald dies mid-shutdown and loses the tail of the teardown log,' \
+          '# so mirror every line to a file on /home with a sync after each write' \
+          'LOGFILE=/home/deck/.local/state/gpu-teardown.log' \
+          'log() { echo "$(date -Is) $1" >> "$LOGFILE"; sync "$LOGFILE" 2>/dev/null; echo "gpu-teardown: $1" | systemd-cat -t gpu-teardown; echo "$1"; }' \
           ' ' \
-          'log "=== v3 shutdown teardown ==="' \
+          '# Every sysfs write runs in a timeout-guarded child: a wedged unbind' \
+          '# (D-state write, e.g. snd_pci_ps) must never take the script down' \
+          '# with it — later devices still get released.' \
+          'unbind_dev() {' \
+          '  dev=$1' \
+          '  if [ -e /sys/bus/pci/devices/$dev/driver ]; then' \
+          '    drv=$(basename "$(readlink /sys/bus/pci/devices/$dev/driver)")' \
+          '    log "unbinding $dev from $drv"' \
+          '    timeout -k 2 10 sh -c "echo $dev > /sys/bus/pci/devices/$dev/driver/unbind" 2>/dev/null \' \
+          '      || log "WARN: unbind $dev timed out or failed, continuing"' \
+          '  else' \
+          '    log "$dev: no driver bound, skipping unbind"' \
+          '  fi' \
+          '  sleep 2' \
+          '}' \
+          ' ' \
+          'remove_dev() {' \
+          '  dev=$1' \
+          '  if [ -d /sys/bus/pci/devices/$dev ]; then' \
+          '    log "removing $dev from PCI tree"' \
+          '    timeout -k 2 10 sh -c "echo 1 > /sys/bus/pci/devices/$dev/remove" 2>/dev/null \' \
+          '      || log "WARN: remove $dev timed out or failed, continuing"' \
+          '  fi' \
+          '  sleep 2' \
+          '}' \
+          ' ' \
+          'log "=== v3.5 shutdown teardown ==="' \
           ' ' \
           '# 1. Stop audio server (releases snd_hda_intel on HDMI audio)' \
           'log "stopping audio"' \
@@ -496,27 +561,13 @@ in
           'systemctl stop sddm.service 2>/dev/null' \
           'sleep 2' \
           ' ' \
-          '# 3. Unbind HDMI audio first' \
-          'if [ -e /sys/bus/pci/devices/$AUDIO/driver ]; then' \
-          '  drv=$(basename "$(readlink /sys/bus/pci/devices/$AUDIO/driver)")' \
-          '  log "unbinding $AUDIO from $drv"' \
-          '  echo $AUDIO > /sys/bus/pci/devices/$AUDIO/driver/unbind 2>/dev/null' \
-          'fi' \
-          'sleep 2' \
+          '# 3. Unbind: function 1 (HDMI audio) before function 0 (GPU).' \
+          'unbind_dev $AUDIO  # HDMI audio (GPU function 1)' \
+          'unbind_dev $GPU    # amdgpu_device_fini -> PSP/SMU cleanup' \
           ' ' \
-          '# 4. Unbind amdgpu (triggers amdgpu_device_fini -> PSP cleanup)' \
-          'if [ -e /sys/bus/pci/devices/$GPU/driver ]; then' \
-          '  drv=$(basename "$(readlink /sys/bus/pci/devices/$GPU/driver)")' \
-          '  log "unbinding $GPU from $drv"' \
-          '  echo $GPU > /sys/bus/pci/devices/$GPU/driver/unbind 2>/dev/null' \
-          'fi' \
-          'sleep 2' \
-          ' ' \
-          '# 5. Remove from PCI tree (NO bus reset!)' \
-          'log "removing devices from PCI tree"' \
-          '[ -d /sys/bus/pci/devices/$AUDIO ] && echo 1 > /sys/bus/pci/devices/$AUDIO/remove 2>/dev/null' \
-          'sleep 2' \
-          '[ -d /sys/bus/pci/devices/$GPU ] && echo 1 > /sys/bus/pci/devices/$GPU/remove 2>/dev/null' \
+          '# 4. Remove both from the PCI tree (NO bus reset!)' \
+          'remove_dev $AUDIO' \
+          'remove_dev $GPU' \
           ' ' \
           'log "teardown complete"' \
           'exit 0' \
@@ -526,14 +577,20 @@ in
         tmp_gpu=$(mktemp)
         printf '%s\n' \
           '[Unit]' \
-          'Description=Release GPU before shutdown (v3: full teardown)' \
+          'Description=Release GPU before shutdown (v3.5: GPU pair teardown)' \
           'DefaultDependencies=no' \
-          'Before=shutdown.target reboot.target halt.target' \
+          '# umount.target ordering keeps /home (where this script + log live)' \
+          '# mounted until the teardown finishes' \
+          'Before=shutdown.target reboot.target halt.target umount.target' \
           'After=sddm.service' \
           ' ' \
           '[Service]' \
           'Type=oneshot' \
-          'TimeoutStartSec=60' \
+          '# worst case: ~8 timeout-guarded sysfs writes (10s each) + sleeps' \
+          'TimeoutStartSec=180' \
+          '# never SIGTERM/SIGKILL the teardown mid-run — a killed script leaves' \
+          '# amdgpu bound and QEMU exit then sync-floods the host (v3.3 failure)' \
+          'KillMode=none' \
           'ExecStart=/bin/bash /home/deck/.local/bin/gpu-teardown.sh' \
           ' ' \
           '[Install]' \
@@ -639,15 +696,32 @@ in
         fi
 
         # --- 9. Decky Loader ---
+        # Version-aware: a stale loader breaks UI injection after Steam client
+        # updates (icon vanishes, wsrouter "no connected socket"), so upgrade
+        # whenever a newer release exists, not only when the binary is missing.
         decky_dir=/home/deck/homebrew/services
         decky_bin="$decky_dir/PluginLoader"
-        if [ ! -f "$decky_bin" ]; then
-          echo "activate-persistent-fixes: downloading Decky Loader"
-          mkdir -p "$decky_dir"
-          tag=$(curl -fsSL -o /dev/null -w '%{redirect_url}' https://github.com/SteamDeckHomebrew/decky-loader/releases/latest | grep -oP 'v[\d.]+')
-          curl -fsSL "https://github.com/SteamDeckHomebrew/decky-loader/releases/download/$tag/PluginLoader" -o "$decky_bin"
-          chmod 755 "$decky_bin"
-          chown -R deck:deck /home/deck/homebrew
+        decky_ver_file="$decky_dir/.loader.version"
+        # no -L: %{redirect_url} is only populated when the redirect is NOT followed
+        decky_latest=$(curl -fsS --max-time 10 -o /dev/null -w '%{redirect_url}' https://github.com/SteamDeckHomebrew/decky-loader/releases/latest 2>/dev/null | grep -oP 'v[\d.]+' || true)
+        decky_installed=$(cat "$decky_ver_file" 2>/dev/null || true)
+        if [ ! -f "$decky_bin" ] || { [ -n "$decky_latest" ] && [ "$decky_latest" != "$decky_installed" ]; }; then
+          if [ -z "$decky_latest" ]; then
+            echo "activate-persistent-fixes: SKIP Decky (cannot resolve latest release tag)"
+          else
+            echo "activate-persistent-fixes: installing Decky Loader $decky_latest (installed: $decky_installed)"
+            mkdir -p "$decky_dir"
+            tmp_decky_bin=$(mktemp)
+            if curl -fsSL "https://github.com/SteamDeckHomebrew/decky-loader/releases/download/$decky_latest/PluginLoader" -o "$tmp_decky_bin"; then
+              install -m 755 "$tmp_decky_bin" "$decky_bin"
+              echo "$decky_latest" > "$decky_ver_file"
+              chown -R deck:deck /home/deck/homebrew
+              systemctl try-restart plugin_loader.service 2>/dev/null || true
+            else
+              echo "activate-persistent-fixes: WARNING Decky $decky_latest download failed, keeping existing binary"
+            fi
+            rm -f "$tmp_decky_bin"
+          fi
         fi
         # decky-gfn plugin (github.com/DimmKirr/decky-gfn)
         gfn_plugin_dir=/home/deck/homebrew/plugins/decky-gfn

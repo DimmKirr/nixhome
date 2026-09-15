@@ -204,6 +204,7 @@ let
     # libngspice  # Conflicts with ngspice from other dependencies
     claude-code
     go-task
+    opencommit
     cliamp # Terminal Winamp - retro terminal music player
   ];
   # Local script: per-session tmux snapshot tool (replaces bash tmuxsave pipeline).

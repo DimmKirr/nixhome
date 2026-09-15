@@ -87,6 +87,21 @@
     starship = import ../programs/starship.nix { inherit pkgs; };
   };
 
+  # OpenCommit (oco) — AI commit messages via OpenRouter
+  home.file.".opencommit".text = ''
+    OCO_AI_PROVIDER=openrouter
+    OCO_API_URL=https://openrouter.ai/api/v1
+    OCO_MODEL=~deepseek/deepseek-flash-latest
+    OCO_TOKENS_MAX_INPUT=128000
+    OCO_TOKENS_MAX_OUTPUT=1000
+    OCO_EMOJI=false
+    OCO_LANGUAGE=en
+    OCO_PROMPT_MODULE=conventional-commit
+    OCO_ONE_LINE_COMMIT=false
+    OCO_DESCRIPTION=false
+    OCO_GITPUSH=true
+  '';
+
   xdg.configFile."mc/skins/dracula256.ini".source = ../programs/mc-skins/dracula256.ini;
   xdg.configFile."mc/menu".source = ../programs/mc.menu;
   xdg.configFile."vifm/vifmrc".source = ../programs/vifm/vifmrc;

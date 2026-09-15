@@ -79,8 +79,37 @@ _dynamic_completion() {
 # TODO: Possibly replace this by nix-native solution
 #ize gen completion zsh > $HOME/.nix-profile/share/zsh/site-functions/_ize && chmod +rx $HOME/.nix-profile/share/zsh/site-functions/_ize
 
-# TODO: Move to 1Password https://samedwardes.com/blog/2023-11-28-1password-for-secret-dotfiles-update/
+# Legacy SecureVault (loaded first, 1Password below overwrites conflicts)
 [ -f "/Volumes/SecureVault/profile/kireevco.rc" ] && source "/Volumes/SecureVault/profile/kireevco.rc"
+
+# 1Password secrets injection
+# Exports all labeled fields from each vault item as env vars.
+# New tmux panes inherit secrets from the session env, skipping re-auth.
+OP_DOCS=("prod-automationd-llm")
+
+_op_inject_secrets() {
+  local doc="$1"
+  local json
+  json="$(op item get "$doc" --format json --reveal --cache 2>/dev/null)" || return 1
+  eval "$(echo "$json" | jq -r '.fields[] | select(.label and .value) | @sh "export \(.label)=\(.value)"')"
+  # Push into tmux session env so new panes inherit without re-auth
+  if [[ -n "$TMUX" ]]; then
+    echo "$json" | jq -r '.fields[] | select(.label and .value) | "\(.label)\t\(.value)"' | \
+      while IFS=$'\t' read -r key val; do
+        tmux set-environment "$key" "$val"
+      done
+  fi
+}
+
+if (( $+commands[op] )) && (( $+commands[jq] )); then
+  # Skip if secrets are already inherited from tmux session env
+  if [[ -z "$OPENROUTER_API_KEY" ]]; then
+    for _op_doc in "${OP_DOCS[@]}"; do
+      _op_inject_secrets "$_op_doc"
+    done
+    unset _op_doc
+  fi
+fi
 
 # Custom PATH for tools developed that require to be accessed globally
 # export PATH="$HOME/dev/automationd/atun/bin:$PATH" # disabled and managed in home manager main.
@@ -827,6 +856,33 @@ Diff (truncated to 8000 chars):
   aigroupcommit --show
   echo "Review/edit: $groups_file"
   echo "Commit: aigroupcommit --commit"
+}
+
+# AI commit via DeepSeek Flash (OpenRouter EU) + git-group-commit skill
+# Usage:
+#   cm                    # group and commit all uncommitted changes
+#   cm "focus on auth"    # pass additional context
+cm() {
+  if ! command -v claude &>/dev/null; then
+    echo "Error: claude CLI not found"
+    return 1
+  fi
+  if [[ -z "$OPENROUTER_API_KEY" ]]; then
+    echo "Error: OPENROUTER_API_KEY not set (check 1Password injection)"
+    return 1
+  fi
+
+  local prompt="use /git-group-commit to commit my changes"
+  if [[ -n "$*" ]]; then
+    prompt="$prompt. Additional context: $*"
+  fi
+
+  ANTHROPIC_API_KEY="" \
+  ANTHROPIC_BASE_URL="https://openrouter.ai/api" \
+  ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" \
+  ANTHROPIC_MODEL="~deepseek/deepseek-flash-latest[1m]" \
+  CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1 \
+    claude -p "$prompt" 2> >(grep -v 'claude-code:unrecognized_model\|connectors are disabled' >&2)
 }
 
 # Use 1Password SSH agent

@@ -83,6 +83,7 @@ in
       vulkan-tools     # vulkaninfo
       mesa-demos       # glxgears/vkgears
       ffmpeg-full      # hwaccel decode tests (vaapi + vulkan)
+      gcc              # C compiler for isolated tests (gfn-av1 etc.)
     ] ++ (with pkgsUnstable; [
       k9s
     ]);
@@ -100,9 +101,10 @@ in
             - steamosctl switch-to-desktop-mode || steamos-session-select plasma
             - sleep 3
             # (task's shell propagates a failed `if` condition, hence &&/|| form)
-            - pgrep -x gamescope >/dev/null && sudo systemctl restart sddm || true
+            # compositor comm is "gamescope-wl" in embedded sessions
+            - pgrep -x 'gamescope(-wl)?' >/dev/null && sudo systemctl restart sddm || true
             - task: wait-for
-              vars: { STOP: gamescope, START: plasmashell }
+              vars: { STOP: 'gamescope(-wl)?', START: plasmashell }
 
         game:
           desc: Switch to Game Mode (gamescope)
@@ -112,19 +114,19 @@ in
             - sleep 3
             - pgrep -x plasmashell >/dev/null && sudo systemctl restart sddm || true
             - task: wait-for
-              vars: { STOP: plasmashell, START: gamescope }
+              vars: { STOP: plasmashell, START: 'gamescope(-wl)?' }
 
         wait-for:
           internal: true
           silent: true
           cmd: |
             for i in $(seq 1 60); do
-              pgrep -x {{.STOP}} >/dev/null && { printf '\rwaiting: {{.STOP}} shutting down (%ss)' "$i"; sleep 1; continue; }
+              pgrep -x '{{.STOP}}' >/dev/null && { printf '\rwaiting: {{.STOP}} shutting down (%ss)' "$i"; sleep 1; continue; }
               break
             done
             echo ""
             for i in $(seq 1 60); do
-              pgrep -x {{.START}} >/dev/null && { echo "{{.START}} is up"; exit 0; }
+              pgrep -x '{{.START}}' >/dev/null && { echo "{{.START}} is up"; exit 0; }
               printf '\rwaiting: {{.START}} starting (%ss)' "$i"
               sleep 1
             done
@@ -223,13 +225,18 @@ in
       Description=K3s Agent
       After=network-online.target
       Wants=network-online.target
+      # never start before /home is mounted — kubelet/containerd would write
+      # into the empty mountpoint on the tiny root/var partitions
+      RequiresMountsFor=/home
 
       [Service]
       Type=exec
       EnvironmentFile=-/home/deck/.config/k3s/env.local
       # native duplicates every layer chain (~1M inodes); overlayfs is blocked
       # by casefold on /home, so use fuse-overlayfs (/usr/bin/fuse-overlayfs)
-      ExecStart=/home/deck/.nix-profile/bin/k3s agent --data-dir /home/.rancher/k3s --snapshotter=fuse-overlayfs
+      # kubelet root-dir defaults to /var/lib/kubelet (230M SteamOS /var
+      # partition) — EmptyDirs there trip DiskPressure, so keep it on /home
+      ExecStart=/home/deck/.nix-profile/bin/k3s agent --data-dir /home/.local/var/lib/rancher/k3s --kubelet-arg=root-dir=/home/.local/var/lib/kubelet --snapshotter=fuse-overlayfs
       Restart=always
       RestartSec=5
       KillMode=process
@@ -259,14 +266,23 @@ in
 
         dbg() { echo "switch-steamos-mode: [debug] $*" >&2; }
 
+        # compositor comm is "gamescope-wl" in embedded sessions, bare
+        # "gamescope" when nested — match both wherever we look for it
+        up() {
+          case "$1" in
+            gamescope) pgrep -x 'gamescope(-wl)?' >/dev/null ;;
+            *) pgrep -x "$1" >/dev/null ;;
+          esac
+        }
+
         # pgrep -c prints the count itself (0 on no match) — no `|| echo 0`,
         # that double-printed "0\n0" into the debug lines.
-        dbg "processes: gamescope=$(pgrep -cx gamescope || true) plasmashell=$(pgrep -cx plasmashell || true) kwin=$(pgrep -cx kwin_wayland || true)"
+        dbg "processes: gamescope=$(pgrep -cx 'gamescope(-wl)?' || true) plasmashell=$(pgrep -cx plasmashell || true) kwin=$(pgrep -cx kwin_wayland || true)"
         dbg "sddm: $(systemctl is-active sddm 2>/dev/null || echo unknown)"
         dbg "session sentinel: $(cat ~/.local/state/steamos-session-select 2>/dev/null || echo missing)"
         dbg "steamos-manager: $(systemctl is-active steamos-manager 2>/dev/null || echo unknown)"
 
-        if pgrep -x gamescope >/dev/null; then
+        if up gamescope; then
           current=game; target=desktop
           stop=gamescope start=plasmashell
         elif pgrep -x plasmashell >/dev/null || pgrep -x kwin_wayland >/dev/null; then
@@ -303,7 +319,7 @@ in
 
         dbg "post-switch sentinel: $(cat ~/.local/state/steamos-session-select 2>/dev/null || echo missing)"
         sleep 3
-        dbg "post-sleep processes: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0)"
+        dbg "post-sleep processes: gamescope=$(pgrep -cx 'gamescope(-wl)?' || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0)"
 
         restart_sddm() {
           dbg "restarting sddm ($1)"
@@ -312,13 +328,13 @@ in
 
         # If the old session is still up, restart sddm as the fallback of last resort
         sddm_restarted=0
-        if [ -n "$stop" ] && pgrep -x "$stop" >/dev/null; then
+        if [ -n "$stop" ] && up "$stop"; then
           restart_sddm "$stop still running"
           sddm_restarted=1
         fi
 
         for i in $(seq 1 60); do
-          pgrep -x "$start" >/dev/null && { echo ""; echo "$start is up"; exit 0; }
+          up "$start" && { echo ""; echo "$start is up"; exit 0; }
           # steamosctl can report success without the session ever launching
           # (observed from the none->game path: sddm stays on whatever it had).
           # If nothing came up after 15s, kick sddm once so it relaunches the
@@ -332,7 +348,7 @@ in
           sleep 1
         done
         echo ""
-        dbg "final state: gamescope=$(pgrep -cx gamescope || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0) sddm=$(systemctl is-active sddm 2>/dev/null || echo unknown)"
+        dbg "final state: gamescope=$(pgrep -cx 'gamescope(-wl)?' || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0) sddm=$(systemctl is-active sddm 2>/dev/null || echo unknown)"
         dbg "sddm journal (last 10):"
         sudo journalctl -u sddm -n 10 --no-pager 2>&1 | sed 's/^/  /' >&2
         echo "timed out waiting for $start" >&2
@@ -481,7 +497,7 @@ in
         fi
         rm -f "$tmp_acp"
 
-        # --- 5. GPU teardown service (NMD-299 v3: clean release, RadeonResetBugFix pattern) ---
+        # --- 5. GPU teardown service (NMD-299 v4: clean release, RadeonResetBugFix pattern) ---
         # Teardown logic lives in a separate script: a single ExecStart with
         # line continuations cannot carry comments, since systemd joins
         # continued lines and the first '#' would comment out the rest of the
@@ -491,85 +507,60 @@ in
         tmp_gpush=$(mktemp)
         printf '%s\n' \
           '#!/bin/bash' \
-          '# gpu-teardown v3.5: clean release of the GPU pair before shutdown.' \
-          '# Mirrors RadeonResetBugFix (Windows) logic:' \
-          '#   1. Stop audio + display server (release audio device + DRM master)' \
-          '#   2. Unbind HDMI audio (01:00.1), then amdgpu (01:00.0) —' \
-          '#      amdgpu_device_fini -> PSP/SMU fini is the whole point' \
-          '#   3. Remove both from the PCI tree (NO bus reset!)' \
-          '#' \
-          '# v3.4 -> v3.5: ACP (03:00.0) and USB (04:00.0) are NOT touched at' \
-          '# all. The snd_pci_ps unbind does not just hang the write — it took' \
-          '# the guest kernel down mid-shutdown (persistent log stopped at that' \
-          '# line on 2026-09-10 23:36 AND 2026-09-11 07:48; the guest came back' \
-          '# ~15s later as a REBOOT). A timeout guard cannot survive a kernel' \
-          '# crash, and a shutdown-turned-reboot means QEMU never exits, the VM' \
-          '# never stops, and the host post-stop hookscript (remove/rescan)' \
-          '# never runs. ACP stays driverless via the modprobe blacklist' \
-          '# installed in step 4b — nothing to unbind.' \
-          '#' \
-          '# The bus reset (echo 1 > .../reset) in v2 is REMOVED: it triggers a' \
-          '# sync flood on Phoenix3 because the PSP/SMU are still live after a' \
-          '# dirty unbind.' \
+          '# gpu-teardown v4: release the GPU pair before shutdown so the PSP/SMU' \
+          '# are quiesced when QEMU exits (AMD reset bug mitigation).' \
+          '#   1. stop audio + display server (release audio fds + DRM master)' \
+          '#   2. unbind HDMI audio (.1), then GPU (.0) - amdgpu_device_fini' \
+          '#      running PSP/SMU fini is the whole point' \
+          '#   3. remove both from the PCI tree (NO bus reset - sync flood on Phoenix3)' \
+          '# ACP (1022:15e2) is never touched: snd_pci_ps unbind crashed the kernel' \
+          '# (2026-09-10/11); it stays driverless via the modprobe blacklist (step 4b).' \
+          '# Addresses found by PCI ID at runtime: hostpci edits shift guest BDFs' \
+          '# (adding hostpci4 moved the GPU 01:00.0 -> 02:00.0).' \
+          '# Logs: stdout -> journald (unit sets StandardOutput=journal+console).' \
+          'set -u' \
           ' ' \
-          'GPU=0000:01:00.0    # 1002:1900' \
-          'AUDIO=0000:01:00.1  # 1002:1640 HDMI audio' \
-          '# journald dies mid-shutdown and loses the tail of the teardown log,' \
-          '# so mirror every line to a file on /home with a sync after each write' \
-          'LOGFILE=/home/deck/.local/state/gpu-teardown.log' \
-          'log() { echo "$(date -Is) $1" >> "$LOGFILE"; sync "$LOGFILE" 2>/dev/null; echo "gpu-teardown: $1" | systemd-cat -t gpu-teardown; echo "$1"; }' \
+          'find_bdf() { f=$(grep -l "$1" /sys/bus/pci/devices/*/device 2>/dev/null | head -1); [ -n "$f" ] && basename "$(dirname "$f")"; }' \
           ' ' \
-          '# Every sysfs write runs in a timeout-guarded child: a wedged unbind' \
-          '# (D-state write, e.g. snd_pci_ps) must never take the script down' \
-          '# with it — later devices still get released.' \
-          'unbind_dev() {' \
-          '  dev=$1' \
-          '  if [ -e /sys/bus/pci/devices/$dev/driver ]; then' \
-          '    drv=$(basename "$(readlink /sys/bus/pci/devices/$dev/driver)")' \
-          '    log "unbinding $dev from $drv"' \
-          '    timeout -k 2 10 sh -c "echo $dev > /sys/bus/pci/devices/$dev/driver/unbind" 2>/dev/null \' \
-          '      || log "WARN: unbind $dev timed out or failed, continuing"' \
-          '  else' \
-          '    log "$dev: no driver bound, skipping unbind"' \
-          '  fi' \
-          '  sleep 2' \
+          '# Every sysfs write runs in a timeout-guarded child: a wedged write' \
+          '# (D-state) must never take the script down - later devices still' \
+          '# get released.' \
+          'guarded_write() { # $1=value $2=path $3=description' \
+          '  echo ">>> $3"' \
+          '  timeout -k 2 10 sh -c "echo $1 > $2" 2>/dev/null \' \
+          '    || echo "WARN: $3 failed or timed out, continuing"' \
           '}' \
           ' ' \
-          'remove_dev() {' \
-          '  dev=$1' \
-          '  if [ -d /sys/bus/pci/devices/$dev ]; then' \
-          '    log "removing $dev from PCI tree"' \
-          '    timeout -k 2 10 sh -c "echo 1 > /sys/bus/pci/devices/$dev/remove" 2>/dev/null \' \
-          '      || log "WARN: remove $dev timed out or failed, continuing"' \
-          '  fi' \
-          '  sleep 2' \
-          '}' \
+          'GPU=$(find_bdf 0x1900)     # 1002:1900 Phoenix3 GPU' \
+          'AUDIO=$(find_bdf 0x1640)   # 1002:1640 HDMI audio' \
+          'echo "start (GPU=$GPU AUDIO=$AUDIO)"' \
+          'if [ -z "$GPU" ]; then echo "GPU 1002:1900 not found - nothing to tear down"; exit 0; fi' \
           ' ' \
-          'log "=== v3.5 shutdown teardown ==="' \
-          ' ' \
-          '# 1. Stop audio server (releases snd_hda_intel on HDMI audio)' \
-          'log "stopping audio"' \
+          'echo ">>> stopping audio + display server"' \
           'su - deck -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop pipewire pipewire-pulse wireplumber" 2>/dev/null' \
-          'sleep 2' \
-          'su - deck -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user stop pulseaudio" 2>/dev/null' \
-          'sleep 2' \
-          ' ' \
-          '# 2. Stop display server (releases DRM master fd)' \
-          '# sddm manages the gamescope session: stopping sddm is what' \
-          '# actually kills gamescope (no separate gamescope-session unit)' \
-          'log "stopping display server"' \
+          '# sddm manages the gamescope session; stopping it drops the DRM master fd' \
           'systemctl stop sddm.service 2>/dev/null' \
           'sleep 2' \
           ' ' \
-          '# 3. Unbind: function 1 (HDMI audio) before function 0 (GPU).' \
-          'unbind_dev $AUDIO  # HDMI audio (GPU function 1)' \
-          'unbind_dev $GPU    # amdgpu_device_fini -> PSP/SMU cleanup' \
+          '# unbind HDMI audio (.1) before GPU (.0); empty $AUDIO drops out unquoted' \
+          'for dev in $AUDIO $GPU; do' \
+          '  if [ -e /sys/bus/pci/devices/$dev/driver ]; then' \
+          '    drv=$(basename "$(readlink /sys/bus/pci/devices/$dev/driver)")' \
+          '    guarded_write "$dev" /sys/bus/pci/devices/$dev/driver/unbind "unbind $dev from $drv"' \
+          '  else' \
+          '    echo "$dev: no driver bound, skipping unbind"' \
+          '  fi' \
+          '  sleep 1' \
+          'done' \
           ' ' \
-          '# 4. Remove both from the PCI tree (NO bus reset!)' \
-          'remove_dev $AUDIO' \
-          'remove_dev $GPU' \
+          'for dev in $AUDIO $GPU; do' \
+          '  if [ -d /sys/bus/pci/devices/$dev ]; then' \
+          '    guarded_write 1 /sys/bus/pci/devices/$dev/remove "remove $dev from PCI tree"' \
+          '  fi' \
+          '  sleep 1' \
+          'done' \
           ' ' \
-          'log "teardown complete"' \
+          'echo "teardown complete"' \
           'exit 0' \
           > "$tmp_gpush"
 
@@ -577,20 +568,20 @@ in
         tmp_gpu=$(mktemp)
         printf '%s\n' \
           '[Unit]' \
-          'Description=Release GPU before shutdown (v3.5: GPU pair teardown)' \
+          'Description=Release GPU pair before shutdown (gpu-teardown v4)' \
           'DefaultDependencies=no' \
-          '# umount.target ordering keeps /home (where this script + log live)' \
-          '# mounted until the teardown finishes' \
-          'Before=shutdown.target reboot.target halt.target umount.target' \
+          '# start job at shutdown: runs after sddm has stopped, completes before' \
+          '# shutdown.target is reached and before /home (script location) unmounts' \
           'After=sddm.service' \
+          'Before=shutdown.target umount.target' \
           ' ' \
           '[Service]' \
           'Type=oneshot' \
-          '# worst case: ~8 timeout-guarded sysfs writes (10s each) + sleeps' \
-          'TimeoutStartSec=180' \
-          '# never SIGTERM/SIGKILL the teardown mid-run — a killed script leaves' \
-          '# amdgpu bound and QEMU exit then sync-floods the host (v3.3 failure)' \
-          'KillMode=none' \
+          '# worst case: 4 timeout-guarded sysfs writes (10s each) + sleeps;' \
+          '# generous margin so systemd never SIGTERMs a teardown mid-run' \
+          'TimeoutStartSec=120' \
+          'StandardOutput=journal+console' \
+          'StandardError=journal+console' \
           'ExecStart=/bin/bash /home/deck/.local/bin/gpu-teardown.sh' \
           ' ' \
           '[Install]' \
@@ -609,7 +600,7 @@ in
         if [ "$gpu_changed" = 1 ]; then
           systemctl daemon-reload
           systemctl enable gpu-teardown.service 2>/dev/null
-          echo "activate-persistent-fixes: gpu-teardown v3 updated"
+          echo "activate-persistent-fixes: gpu-teardown v4 updated"
         fi
         rm -f "$tmp_gpu" "$tmp_gpush"
         rm -f /etc/gpu-teardown.sh  # stale pre-v3.1 location (/etc is wiped by SteamOS updates)
@@ -661,11 +652,14 @@ in
               'Description=K3s Agent' \
               'After=network-online.target' \
               'Wants=network-online.target' \
+              '# kubelet/containerd must never write into an unmounted /home mountpoint' \
+              'RequiresMountsFor=/home' \
               ' ' \
               '[Service]' \
               'Type=exec' \
               "EnvironmentFile=$k3s_env" \
-              "ExecStart=$k3s_bin agent --data-dir /home/.rancher/k3s --snapshotter=fuse-overlayfs" \
+              '# kubelet root-dir off the 230M /var (EmptyDirs there -> DiskPressure)' \
+              "ExecStart=$k3s_bin agent --data-dir /home/.local/var/lib/rancher/k3s --kubelet-arg=root-dir=/home/.local/var/lib/kubelet --snapshotter=fuse-overlayfs" \
               'Restart=always' \
               'RestartSec=5' \
               'KillMode=process' \
@@ -879,7 +873,7 @@ in
   xdg.configFile."gamescope/scripts-src/sony.bravia.lua".text = ''
     gamescope.config.known_displays.sony_bravia = {
         pretty_name = "Sony BRAVIA TV",
-        dynamic_refresh_rates = { 60, 120 },
+        dynamic_refresh_rates = { 60, 90, 120 },
         hdr = {
             supported = true,
             force_enabled = true,
@@ -898,6 +892,10 @@ in
             -- Hardcode exact CTA-861-G pixel clocks (calc_max_clock gets them wrong)
             if refresh == 120 then
                 mode.clock = 1188000  -- VIC 118: 4400*2250*120 = 1188 MHz
+            elseif refresh == 90 then
+                -- no CTA VIC for 4K90; same blanking, 4400*2250*90 = 891 MHz
+                -- (fits easily in the FRL link the 120Hz mode already trains)
+                mode.clock = 891000
             elseif refresh == 60 then
                 mode.clock = 594000   -- VIC 97: 4400*2250*60 = 594 MHz
             else
@@ -1034,6 +1032,114 @@ in
     ];
     update.onActivation = true;
   };
+
+  # Patch GFN flatpak vendor.js:
+  # 1. Disable vangogh GPU detection (Steam Deck APU)
+  # 2. Force clientPlatformName="Windows" so server permits AV1 (grc.enable=14)
+  # 3. Strip SRI integrity attributes + clear CefCache
+  home.activation.patchGfnIdentity = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+    MALL_DIR=""
+    for d in "$HOME/.local/share/flatpak/app/com.nvidia.geforcenow" \
+             "/var/lib/flatpak/app/com.nvidia.geforcenow"; do
+      [ -d "$d" ] || continue
+      found=$(find "$d" -maxdepth 10 -name "vendor.*.js" 2>/dev/null | head -1)
+      [ -n "$found" ] && MALL_DIR=$(dirname "$found") && break
+    done
+
+    if [ -n "$MALL_DIR" ]; then
+      echo "gfn-patch: patching $MALL_DIR"
+
+      for f in "$MALL_DIR"/vendor.*.js; do
+        [ -f "$f" ] || continue
+        [ -f "$f.orig" ] || cp "$f" "$f.orig"
+        ${pkgs.gnused}/bin/sed -i 's/\.includes("vangogh")/.includes("DISABLED_vangogh")/g' "$f"
+        ${pkgs.gnused}/bin/sed -i 's/this\.clientPlatformName=i\.clientPlatformName/this.clientPlatformName="Windows"/g' "$f"
+        ${pkgs.gnused}/bin/sed -i 's/let B={Ho:{}/let B={Ho:{nvscClientConfigFields:["vqos[0].grc.enable: 14"]}/g' "$f"
+      done
+      echo "gfn-patch: vangogh disabled + clientPlatformName=Windows + grc.enable=14"
+
+      INDEX="$MALL_DIR/index.html"
+      if [ -f "$INDEX" ]; then
+        [ -f "$INDEX.orig" ] || cp "$INDEX" "$INDEX.orig"
+        ${pkgs.gnused}/bin/sed -i 's/ integrity="sha384-[A-Za-z0-9+/=]*"//g' "$INDEX"
+        echo "gfn-patch: stripped SRI integrity attributes"
+      fi
+
+      rm -rf "$HOME/.var/app/com.nvidia.geforcenow/.local/state/NVIDIA/GeForceNOW/CefCache"
+      echo "gfn-patch: cleared CefCache"
+
+      # GeronimoDebugConfig.txt: force AV1 codec in the native decoder
+      CEF_DIR=$(dirname "$MALL_DIR")/cef
+      STATE_DIR="$HOME/.var/app/com.nvidia.geforcenow/.local/state/NVIDIA/GeForceNOW"
+      for target in "$STATE_DIR" "$CEF_DIR" "$STATE_DIR/logs"; do
+        [ -d "$target" ] || continue
+        printf 'codec=av1\n' > "$target/GeronimoDebugConfig.txt" 2>/dev/null && \
+          echo "gfn-patch: wrote GeronimoDebugConfig.txt to $target" || true
+      done
+
+      # Binary patch libGeronimo.so: force VulkanVideo decoder path
+      # platformCreateVideoDecoder() reads contextType=0 (VDPAU) on Linux.
+      # VDPAU lacks AV1 -> Av1DecodeMax{Width,Height}=0.
+      # Patch: mov edx,5 + 6 NOPs at 0x3c47b8 forces Vulkan (VK_KHR_video_decode_av1).
+      if [ -d "$CEF_DIR" ] && [ -f "$CEF_DIR/libGeronimo.so" ]; then
+        PATCH_OFFSET=$((0x3c47b8))
+        ACTUAL=$(xxd -p -l 11 -s $PATCH_OFFSET "$CEF_DIR/libGeronimo.so" | tr -d ' \n')
+        if [ "$ACTUAL" = "8b531885d20f84a5000000" ]; then
+          [ -f "$CEF_DIR/libGeronimo.so.orig" ] || cp "$CEF_DIR/libGeronimo.so" "$CEF_DIR/libGeronimo.so.orig"
+          printf '\xba\x05\x00\x00\x00\x90\x90\x90\x90\x90\x90' | \
+            dd of="$CEF_DIR/libGeronimo.so" bs=1 seek=$PATCH_OFFSET conv=notrunc 2>/dev/null
+          echo "gfn-patch: patched libGeronimo.so VulkanVideo decoder (0x3c47b8)"
+        elif [ "$ACTUAL" = "ba0500000090909090909090" ]; then
+          echo "gfn-patch: libGeronimo.so already patched"
+        else
+          echo "gfn-patch: WARNING unexpected bytes at 0x3c47b8: $ACTUAL (version changed?)"
+        fi
+      fi
+
+      # Binary patch libGeronimo.so: fake AV1 capability (VDPAUDecoder::getMaxDecoderCapability)
+      # Pre-fill result buffer with 3840x2160 and skip VDPAU query (which rejects AV1).
+      if [ -d "$CEF_DIR" ] && [ -f "$CEF_DIR/libGeronimo.so" ]; then
+        CAP_OFF1=$((0x443f55))
+        CAP_ACT1=$(xxd -p -l 9 -s $CAP_OFF1 "$CEF_DIR/libGeronimo.so" | tr -d ' \n')
+        if [ "$CAP_ACT1" = "48c744241800000000" ]; then
+          printf '\x48\xc7\x44\x24\x18\x00\x0f\x70\x08' | \
+            dd of="$CEF_DIR/libGeronimo.so" bs=1 seek=$CAP_OFF1 conv=notrunc 2>/dev/null
+          echo "gfn-patch: patched libGeronimo.so capability pre-fill 3840x2160 (0x443f55)"
+        fi
+        CAP_OFF2=$((0x443f5e))
+        CAP_ACT2=$(xxd -p -l 5 -s $CAP_OFF2 "$CEF_DIR/libGeronimo.so" | tr -d ' \n')
+        if [ "$CAP_ACT2" = "e8add40000" ]; then
+          printf '\xb0\x01\x90\x90\x90' | \
+            dd of="$CEF_DIR/libGeronimo.so" bs=1 seek=$CAP_OFF2 conv=notrunc 2>/dev/null
+          echo "gfn-patch: patched libGeronimo.so skip VDPAU query (0x443f5e)"
+        fi
+        # platformCodecsAvailable: include AV1 in fallback bitmask (3->7)
+        BM_OFF=$((0x3c554b))
+        BM_ACT=$(xxd -p -l 5 -s $BM_OFF "$CEF_DIR/libGeronimo.so" | tr -d ' \n')
+        if [ "$BM_ACT" = "ba03000000" ]; then
+          printf '\xba\x07\x00\x00\x00' | \
+            dd of="$CEF_DIR/libGeronimo.so" bs=1 seek=$BM_OFF conv=notrunc 2>/dev/null
+          echo "gfn-patch: patched libGeronimo.so codecs bitmask 3->7 (0x3c554b)"
+        fi
+        # platformCodecsAvailable: OR AV1 bit into return value on ALL code paths
+        # Vulkan probe returns 3 (H264+HEVC) on AMD 780M; the fallback patch above
+        # only fires when probe returns 0. This intercepts the shared return point.
+        D_OFF=$((0x3c5553))
+        D_ACT=$(xxd -p -l 5 -s $D_OFF "$CEF_DIR/libGeronimo.so" | tr -d ' \n')
+        if [ "$D_ACT" = "5bc366662e" ]; then
+          printf '\x83\xc8\x04\x5b\xc3' | \
+            dd of="$CEF_DIR/libGeronimo.so" bs=1 seek=$D_OFF conv=notrunc 2>/dev/null
+          echo "gfn-patch: patched libGeronimo.so OR AV1 return (0x3c5553)"
+        elif [ "$D_ACT" = "83c8045bc3" ]; then
+          echo "gfn-patch: libGeronimo.so OR AV1 return already patched"
+        fi
+      fi
+
+      echo "gfn-patch: done"
+    else
+      echo "gfn-patch: GFN flatpak not found, skipping"
+    fi
+  '';
 
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];

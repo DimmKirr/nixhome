@@ -196,7 +196,7 @@ let
     }
   ];
 
-  # F5 (Dictation) and F6 (Do Not Disturb) - require special handling
+  # F5 (Dictation), F6 (Do Not Disturb), F19 (Dictation) - require special handling
   # Order matters: fn+key rules must come BEFORE plain key rules
   specialFunctionKeysRules = [
     # fn+F5 -> Dictation in bundleIdentifiers apps (must come first)
@@ -303,6 +303,16 @@ let
         }
       ];
     }
+    # F19 -> Dictation in all apps (universal dictation trigger)
+    {
+      type = "basic";
+      from = {
+        key_code = "f19";
+      };
+      to = [{
+        consumer_key_code = "dictation";
+      }];
+    }
   ];
 
   # CLI commands triggered by F13-F15
@@ -401,7 +411,7 @@ let
               manipulators = remapOtherKeysRules;
             }
             {
-              description = "F5 Dictation and F6 Do Not Disturb";
+              description = "F5/F19 Dictation and F6 Do Not Disturb";
               manipulators = specialFunctionKeysRules;
             }
             {

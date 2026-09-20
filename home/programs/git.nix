@@ -51,5 +51,6 @@
     ".worktrees"
     ".env"
     ".playwright-mcp"
+    ".vagrant"
   ];
 }

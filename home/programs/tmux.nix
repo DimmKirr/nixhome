@@ -241,6 +241,10 @@ in {
         bind -n S-Left previous-window
         bind -n S-Right next-window
 
+        # Meta+Shift+Left/Right (Ghostty maps Cmd+Shift+Arrow here)
+        bind -n M-S-Left previous-window
+        bind -n M-S-Right next-window
+
         # iPad/Termius friendly: Ctrl+, and Ctrl+.
         bind -n C-, previous-window
         bind -n C-. next-window

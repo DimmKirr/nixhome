@@ -80,6 +80,10 @@
       keybind = cmd+f=text:\x02\x5B\x3F
       keybind = cmd+d=text:\x02\x25
 
+      # Cmd+Shift+Arrow → Alt+Shift+Arrow (let tmux own the action)
+      keybind = cmd+shift+left=esc:[1;4D
+      keybind = cmd+shift+right=esc:[1;4C
+
       # Claude code shift+enter
       keybind = shift+enter=text:\n
   '';

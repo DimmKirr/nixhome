@@ -198,6 +198,7 @@
     appendPrompt = ''
       # Rules
 
+      - When spawning sub-agents, match the model to the task's cognitive demand. Use Haiku or Sonnet for simple tasks (summarizing, tool calls, lookups, formatting). Reserve Fable or Opus for tasks that need deep reasoning (architecture decisions, complex debugging, nuanced code review). Default to Sonnet when unsure.
       - Never publish artifacts. Deliver all work as files in the working directory or scratchpad, and summarize results in the response.
       - Never commit changes unless instructed by a user. Never add "Co-Authored-By" to any commit message.
       - Do not use emdash (—) as it doesn't match the user's writing style. Use `:` instead or a different sentence structure.

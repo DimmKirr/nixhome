@@ -52,6 +52,9 @@ class Pane:
     label: str = ""      # `@label` pane option — set via `prefix > n` menu
                          # ("Rename Pane"). Distinct from pane_title; rendered
                          # alongside it in pane-border-format.
+    style: str = ""      # `select-pane -P` value (e.g. "bg=#1E1B2E") — set via
+                         # the Color submenu. Empty or "default" means no custom
+                         # style. Restored on load via `select-pane -P`.
     persistent_cell_id: str = ""  # CELL_ID env var read from the pane process
 
     @property
@@ -211,14 +214,18 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
         "#{pane_title}",
         "#{@label}",
         "#{pane_pid}",
+        "#{window-style}",
     ])
     raw = _tmux(socket, "list-panes", "-t", window_id, "-F", pane_fmt)
     panes: list[Pane] = []
     for line in raw.splitlines():
         if not line:
             continue
-        pid, pidx, top, left, w, h, cur, start, active, cwd, title, label, ppid = \
-            line.split(SEP, 12)
+        pid, pidx, top, left, w, h, cur, start, active, cwd, title, label, ppid, pstyle = \
+            line.split(SEP, 13)
+        # Normalize: tmux reports "default" when no custom style is set.
+        if pstyle.strip().lower() == "default":
+            pstyle = ""
         panes.append(Pane(
             pane_id=pid,
             pane_index=int(pidx),
@@ -232,6 +239,7 @@ def _query_panes(window_id: str, socket: str | None) -> tuple[Pane, ...]:
             cwd=cwd,
             title=title,
             label=label,
+            style=pstyle,
             persistent_cell_id=_read_pane_env(ppid, "CELL_ID"),
         ))
     # Sort by pane_index, NOT visual position.
@@ -677,6 +685,12 @@ def _emit_pane(lines: list[str], p: Pane) -> None:
         # pattern as CELL_TITLE: travels via the env block for visibility
         # but load_session re-applies it authoritatively via `set -p @label`.
         lines.append(f"        CELL_LABEL: {_yaml_quote(p.label)}")
+    if p.style:
+        # CELL_STYLE → `select-pane -P` value (e.g. "bg=#1E1B2E"). Set via
+        # the Color submenu in the pane right-click / prefix+> menu. Same
+        # restore pattern as title/label: env for visibility, load_session
+        # re-applies authoritatively.
+        lines.append(f"        CELL_STYLE: {_yaml_quote(p.style)}")
 
 
 # ------------------------------------------------------------------ commands
@@ -763,14 +777,15 @@ def load_session(yaml_path: Path, *,
     # changes without depending on the shell.
     titles_by_window = _parse_pane_env(text, "CELL_TITLE")
     labels_by_window = _parse_pane_env(text, "CELL_LABEL")
-    if titles_by_window or labels_by_window:
+    styles_by_window = _parse_pane_env(text, "CELL_STYLE")
+    if titles_by_window or labels_by_window or styles_by_window:
         if name_to_id is None:
             name_to_id = _list_window_ids(session_name, socket=socket, env=env)
 
-        # All window names referenced by either map. The list-panes
-        # query runs once per window and is shared between title/label
+        # All window names referenced by any map. The list-panes
+        # query runs once per window and is shared between title/label/style
         # restore to avoid double-shelling.
-        all_windows = set(titles_by_window) | set(labels_by_window)
+        all_windows = set(titles_by_window) | set(labels_by_window) | set(styles_by_window)
         for window_name in all_windows:
             wid = name_to_id.get(window_name)
             if wid is None:
@@ -827,6 +842,24 @@ def load_session(yaml_path: Path, *,
                                    text=True, env=env)
                 except subprocess.CalledProcessError as e:
                     print(f"[WARN] restore @label on {pid}: {e.stderr or e}",
+                          file=sys.stderr)
+
+            # Restore pane styles: `select-pane -t <pid> -P <style>`
+            # Set via the Color submenu (e.g. "bg=#1E1B2E"). Skipped for
+            # empty values — panes without a custom color keep the default.
+            for pane_index, style in styles_by_window.get(window_name, {}).items():
+                pid = idx_to_id.get(pane_index)
+                if pid is None or not style:
+                    continue
+                try:
+                    tmux_cmd = ["tmux"]
+                    if socket:
+                        tmux_cmd += ["-S", socket]
+                    tmux_cmd += ["select-pane", "-t", pid, "-P", style]
+                    subprocess.run(tmux_cmd, check=True, capture_output=True,
+                                   text=True, env=env)
+                except subprocess.CalledProcessError as e:
+                    print(f"[WARN] restore pane style on {pid}: {e.stderr or e}",
                           file=sys.stderr)
 
 

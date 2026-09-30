@@ -52,5 +52,7 @@
     ".env"
     ".playwright-mcp"
     ".vagrant"
+    ".tools"
+    "core"
   ];
 }

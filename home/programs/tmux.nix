@@ -111,6 +111,29 @@
     tmux display-message "$msg"
   '';
 
+  # Pane color submenu — launched from the right-click and prefix+> menus.
+  # Extracted into a script to avoid quote-nesting issues between the outer
+  # display-menu command string and the inner display-menu arguments.
+  # $1 = target pane (e.g. #{mouse_pane} or empty for current pane).
+  # $2/$3 = menu position flags (e.g. "-x R -y P" or "-x W -y W").
+  paneColorMenu = pkgs.writeShellScript "pane-color-menu" ''
+    target="$1"
+    xpos="''${2:--x R}"
+    ypos="''${3:--y P}"
+    sel="select-pane''${target:+ -t $target}"
+    tmux display-menu -T "#[align=centre]Pane Color" $xpos $ypos \
+      "#[fg=#BD93F9]Purple"  p "$sel; select-pane -P bg=#211B41" \
+      "#[fg=#8BE9FD]Blue"    b "$sel; select-pane -P bg=#1B2951" \
+      "#[fg=#8BE9FD]Cyan"    c "$sel; select-pane -P bg=#1B3941" \
+      "#[fg=#50FA7B]Green"   g "$sel; select-pane -P bg=#1B4121" \
+      "#[fg=#F1FA8C]Yellow"  y "$sel; select-pane -P bg=#41391B" \
+      "#[fg=#FFB86C]Orange"  o "$sel; select-pane -P bg=#412D1B" \
+      "#[fg=#FF5555]Red"     r "$sel; select-pane -P bg=#411B21" \
+      "#[fg=#FF79C6]Pink"    k "$sel; select-pane -P bg=#411B31" \
+      "" "" "" \
+      "Reset"                x "$sel; select-pane -P default"
+  '';
+
   cellConnect = pkgs.writeShellScript "cell-connect" ''
     proto="$1"
     wname="$2"
@@ -305,7 +328,7 @@ in {
         # picks up the brighter mauve so it's still visually identifiable
         # without shouting.
         set -g pane-border-style        'fg=${theme.palette.overlay_0}'
-        set -g pane-active-border-style 'fg=${theme.palette.overlay_2}'
+        set -g pane-active-border-style 'fg=${theme.palette.mauve}'
         # Layout: "<index> <@label> | <pane_title>".
         #   @label      — custom name set via "Rename Pane" (prefix + > → n)
         #   pane_title  — OSC-set terminal title (Claude's "✳ Claude …",
@@ -339,6 +362,7 @@ in {
             "Zoom"            z "resize-pane -Z" \
             "Rename Pane" n "select-pane -t '#{mouse_pane}'\; command-prompt -I '#{@label}' 'set -p @label \"%%\"; refresh-client'" \
             "Clear Label" N "select-pane -t '#{mouse_pane}'\; set -p @label \"\"\; refresh-client" \
+            "Color ▸"     c "run-shell '${paneColorMenu} #{mouse_pane} \"-x R\" \"-y P\"'" \
             "" "" "" \
             "Connect to VNC" V "run-shell '${cellConnect} vnc \"#{window_name}\" #{window_id}'" \
             "Connect to RDP" r "run-shell '${cellConnect} rdp \"#{window_name}\" #{window_id}'" \
@@ -363,6 +387,7 @@ in {
           "" "" "" \
           "Rename Pane" n "command-prompt -I '#{@label}' 'set -p @label \"%%\"; refresh-client'" \
           "Clear Label" N "set -p @label \"\"; refresh-client" \
+          "Color ▸"     c "run-shell '${paneColorMenu} \"\" \"-x W\" \"-y W\"'" \
           "" "" "" \
           "Connect to VNC" V "run-shell '${cellConnect} vnc \"#{window_name}\" #{window_id}'" \
           "Connect to RDP" r "run-shell '${cellConnect} rdp \"#{window_name}\" #{window_id}'" \

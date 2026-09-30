@@ -2331,6 +2331,183 @@ class PickerIntegrationTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "DIMM")
 
 
+class PaneStyleRoundTripTests(unittest.TestCase):
+    """Style (pane color) round-trip: `select-pane -P` value must survive
+    save → kill → load → re-apply preset.
+
+    The Color submenu in tmux.nix sets per-pane background colors via
+    `select-pane -P bg=#XXXXXX`. The snapshot saves this as `CELL_STYLE`
+    in the YAML environment block, and load_session restores it via
+    `select-pane -t <pid> -P <style>`.
+
+    Canary mapping (mirrors the Color submenu palette):
+        pane_index 0 (bottom / main)  → bg=#411B21  (red)
+        pane_index 1 (top-left)       → bg=#211B41  (purple)
+        pane_index 2 (top-right)      → bg=#1B4121  (green)
+    """
+
+    STYLES_BY_INDEX = {0: "bg=#411B21", 1: "bg=#211B41", 2: "bg=#1B4121"}
+    # Visual order for mirrored: top-left, top-right, bottom
+    EXPECTED_VISUAL_MIRRORED = ["bg=#211B41", "bg=#1B4121", "bg=#411B21"]
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def _visual_panes(self, sock: str) -> list:
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_top} #{pane_left} #{pane_id}",
+                   env=self.fx.env).splitlines()
+        return sorted(
+            (int(t), int(l), pid)
+            for t, l, pid in (line.split() for line in raw if line.strip())
+        )
+
+    def _styles_in_visual_order(self, sock: str) -> list[str]:
+        # tmux 3.6+ stores per-pane style in `window-style` (set by
+        # `select-pane -P`). The older `#{pane_style}` format is empty.
+        return [
+            tmux(sock, "display-message", "-p", "-t", pid, "#{window-style}",
+                 env=self.fx.env).strip()
+            for _, _, pid in self._visual_panes(sock)
+        ]
+
+    def _indexed_panes(self, sock: str) -> list[tuple[int, str]]:
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_index} #{pane_id}",
+                   env=self.fx.env).splitlines()
+        items = []
+        for line in raw:
+            if not line.strip():
+                continue
+            idx, pid = line.split()
+            items.append((int(idx), pid))
+        items.sort(key=lambda x: x[0])
+        return items
+
+    def _apply_canary_styles(self, sock: str) -> None:
+        env = self.fx.env
+        idx_to_pid = dict(self._indexed_panes(sock))
+        for idx, style in self.STYLES_BY_INDEX.items():
+            pid = idx_to_pid.get(idx)
+            self.assertIsNotNone(
+                pid, f"no pane at pane_index={idx}")
+            tmux(sock, "select-pane", "-t", pid, "-P", style, env=env)
+
+    def _build_three_pane_mirrored(self, sock: str) -> None:
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+
+    def test_save_emits_cell_style(self):
+        """Save side: snapshot YAML must contain CELL_STYLE entries for
+        each styled pane."""
+        sock = self.fx.sock
+        self._build_three_pane_mirrored(sock)
+        self._apply_canary_styles(sock)
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        yaml_text = target.read_text()
+
+        for style in self.STYLES_BY_INDEX.values():
+            self.assertIn(f"CELL_STYLE: '{style}'", yaml_text,
+                          f"style {style!r} missing from saved YAML")
+
+    def test_styles_survive_save_load_reapply(self):
+        """Full round-trip: save → kill → load → re-apply preset.
+        After each step, the three canary styles must occupy the same
+        VISUAL slots as before save."""
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_three_pane_mirrored(sock)
+        self._apply_canary_styles(sock)
+
+        before = self._styles_in_visual_order(sock)
+        self.assertEqual(self.EXPECTED_VISUAL_MIRRORED, before,
+                         "pre-save canary styles did not land as expected")
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        self.assertIn("CELL_STYLE", target.read_text(),
+                      "snapshot YAML missing CELL_STYLE entries")
+
+        # Kill + load
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+        after_load = self._styles_in_visual_order(self.fx.load_sock)
+
+        # Re-apply the preset (simulates user pressing `prefix S h`).
+        tmux(self.fx.load_sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(self.fx.load_sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.2)
+        after_reapply = self._styles_in_visual_order(self.fx.load_sock)
+
+        self.assertEqual(self.EXPECTED_VISUAL_MIRRORED, after_load,
+                         f"styles scrambled after load:\n"
+                         f"  expected: {self.EXPECTED_VISUAL_MIRRORED}\n"
+                         f"  got:      {after_load}")
+        self.assertEqual(self.EXPECTED_VISUAL_MIRRORED, after_reapply,
+                         f"styles scrambled after re-apply:\n"
+                         f"  expected: {self.EXPECTED_VISUAL_MIRRORED}\n"
+                         f"  got:      {after_reapply}")
+
+    def test_unstyled_panes_stay_default_after_round_trip(self):
+        """Panes without a custom color must NOT acquire a style on load.
+        Only panes with CELL_STYLE in the YAML should get select-pane -P."""
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_three_pane_mirrored(sock)
+        # Style only one pane, leave the other two default.
+        idx_to_pid = dict(self._indexed_panes(sock))
+        tmux(sock, "select-pane", "-t", idx_to_pid[0], "-P", "bg=#411B21", env=env)
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+
+        styles = self._styles_in_visual_order(self.fx.load_sock)
+        # Count how many panes have a non-default style
+        styled = [s for s in styles if s and s.lower() != "default"]
+        self.assertEqual(len(styled), 1,
+                         f"expected exactly 1 styled pane, got {len(styled)}: {styles}")
+        self.assertIn("bg=#411B21", styled[0])
+
+    def test_style_reset_survives_round_trip(self):
+        """A pane that was styled then reset (`select-pane -P default`)
+        must NOT carry over its old color after save/load."""
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_three_pane_mirrored(sock)
+        idx_to_pid = dict(self._indexed_panes(sock))
+        # Set a color, then reset it
+        tmux(sock, "select-pane", "-t", idx_to_pid[0], "-P", "bg=#411B21", env=env)
+        tmux(sock, "select-pane", "-t", idx_to_pid[0], "-P", "default", env=env)
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        yaml_text = target.read_text()
+        # The YAML should NOT contain any CELL_STYLE (all panes are default)
+        self.assertNotIn("CELL_STYLE", yaml_text,
+                         f"reset pane leaked CELL_STYLE into YAML:\n{yaml_text}")
+
+
 class MarkLiveTests(unittest.TestCase):
     """Feature: `tmux-snapshot list --mark-live` marks active sessions."""
 

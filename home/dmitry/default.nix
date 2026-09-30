@@ -120,11 +120,11 @@
       profiles.default = {
         isActive = true;
         isService = true;
-        setDockerHost = false;
+        setDockerHost = true;
         settings = {
           cpu = 8;
           memory = 24;
-          disk = 60;
+          disk = 120;
           runtime = "docker";
           vmType = "vz";
           rosetta = true;

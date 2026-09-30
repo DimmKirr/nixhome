@@ -18,6 +18,7 @@ with pkgs; [
   # karabiner-elements  # Using homebrew - nix can't register app bundles with macOS properly
 
   docker-client
+  docker-credential-helpers
   libvirt
   swtpm
 

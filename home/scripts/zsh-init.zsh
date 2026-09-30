@@ -458,16 +458,27 @@ hs-kirr-toggle() {
 
 cleandocker() {
   if [[ "$1" == "-f" ]]; then
-    # Full reset - delete VM disk
-    docker desktop stop
-
-    echo "Removing Docker VM disk..."
-    rm -rf ~/Library/Containers/com.docker.docker/Data/vms/0/data
-    docker desktop start
-
-    echo "Docker is ready!"
+    # Full reset - destroy and recreate the VM
+    if command -v colima &>/dev/null && colima status &>/dev/null; then
+      echo "Colima detected. Deleting VM..."
+      colima delete -f
+      echo "Recreating Colima VM..."
+      colima start
+      echo "Colima is ready!"
+    elif pgrep -q "Docker Desktop" 2>/dev/null; then
+      echo "Docker Desktop detected. Resetting VM..."
+      docker desktop stop
+      echo "Removing Docker VM disk..."
+      rm -rf ~/Library/Containers/com.docker.docker/Data/vms/0/data
+      docker desktop start
+      echo "Docker Desktop is ready!"
+    else
+      echo "No running Docker runtime detected (Colima or Docker Desktop)."
+      echo "Run soft cleanup instead: cleandocker"
+      return 1
+    fi
   else
-    # Soft cleanup
+    # Soft cleanup - works with any Docker runtime
     echo "Removing Containers"
     docker rm -f $(docker ps -aq) 2>/dev/null || true
 

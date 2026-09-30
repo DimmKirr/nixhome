@@ -185,6 +185,27 @@ in {
     };
   };
 
+  # Expose colima's docker socket at the default path for tools that ignore
+  # DOCKER_HOST/contexts (testcontainers, SDKs, IDE plugins). /var/run is wiped
+  # on boot, so a RunAtLoad daemon recreates the symlink. A real socket (e.g.
+  # from Docker Desktop) is left untouched.
+  launchd.daemons.colima-docker-sock = {
+    serviceConfig = {
+      ProgramArguments = [
+        "/bin/sh" "-c"
+        ''
+          if [ -S /var/run/docker.sock ] && [ ! -L /var/run/docker.sock ]; then
+            echo "real socket at /var/run/docker.sock, skipping"; exit 0
+          fi
+          ln -sfn /Users/dmitry/.colima/default/docker.sock /var/run/docker.sock
+        ''
+      ];
+      RunAtLoad = true;
+      StandardOutPath = "/var/log/colima-docker-sock.log";
+      StandardErrorPath = "/var/log/colima-docker-sock.log";
+    };
+  };
+
 
   # Used for backwards compatibility, please read the changelog before changing.
   # $ darwin-rebuild changelog

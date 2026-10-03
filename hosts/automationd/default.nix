@@ -16,6 +16,9 @@ in {
   environment.systemPackages = with pkgs; [
     home-manager
     defaultbrowser
+    # Virtual iPhone (Launchpad app + vphone-cli shim). App is copied into
+    # /Applications/Nix Apps; Launchpad manages VPhone.bundle itself.
+    (callPackage ../../pkgs/vphone-launchpad.nix { })
     #    karabiner-elements #v15 is broken, using homebrew
   ];
 

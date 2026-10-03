@@ -319,17 +319,28 @@ in
 
         dbg "post-switch sentinel: $(cat ~/.local/state/steamos-session-select 2>/dev/null || echo missing)"
         sleep 3
-        dbg "post-sleep processes: gamescope=$(pgrep -cx 'gamescope(-wl)?' || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0)"
+        dbg "post-sleep processes: gamescope=$(pgrep -cx 'gamescope(-wl)?' || true) plasmashell=$(pgrep -cx plasmashell || true)"
 
         restart_sddm() {
           dbg "restarting sddm ($1)"
           sudo systemctl restart sddm 2>&1 || dbg "sddm restart failed (rc=$?)"
         }
 
+        # Give the old session time to exit on its own: Steam's graceful
+        # shutdown takes several seconds, and restarting sddm mid-teardown
+        # lands back in game mode (one-shot plasma choice already consumed).
+        if [ -n "$stop" ]; then
+          for i in $(seq 1 20); do
+            up "$stop" || break
+            sleep 1
+          done
+          dbg "$stop exit wait: ''${i}s"
+        fi
+
         # If the old session is still up, restart sddm as the fallback of last resort
         sddm_restarted=0
         if [ -n "$stop" ] && up "$stop"; then
-          restart_sddm "$stop still running"
+          restart_sddm "$stop still running after 20s"
           sddm_restarted=1
         fi
 
@@ -348,7 +359,7 @@ in
           sleep 1
         done
         echo ""
-        dbg "final state: gamescope=$(pgrep -cx 'gamescope(-wl)?' || echo 0) plasmashell=$(pgrep -cx plasmashell || echo 0) sddm=$(systemctl is-active sddm 2>/dev/null || echo unknown)"
+        dbg "final state: gamescope=$(pgrep -cx 'gamescope(-wl)?' || true) plasmashell=$(pgrep -cx plasmashell || true) sddm=$(systemctl is-active sddm 2>/dev/null || echo unknown)"
         dbg "sddm journal (last 10):"
         sudo journalctl -u sddm -n 10 --no-pager 2>&1 | sed 's/^/  /' >&2
         echo "timed out waiting for $start" >&2
@@ -359,23 +370,51 @@ in
     # acpid config lives on /home (survives OS updates); the acpid.service
     # unit installed by activate-persistent-fixes points here via -c.
     file.".config/acpi/events/power-button".text = ''
-      event=button/power.*
+      event=button/power PBTN.*
       action=/home/deck/.local/bin/acpi-power-action %e
     '';
 
-    # Runs as root from acpid on a single power-button press. Dispatches
-    # switch-steamos-mode as deck; flock drops presses while a switch is
-    # already in flight (a switch can take 60s+).
+    # Log-only while the power-button chain is being tested: the host
+    # classifies gestures and forwards them via the guest agent (tag
+    # power-button). A raw ACPI press reaching the VM is just recorded,
+    # it no longer triggers switch-steamos-mode.
     file.".local/bin/acpi-power-action" = {
       executable = true;
       text = ''
         #!/bin/bash
+        logger -t power-button "acpi event in vm: $*"
+      '';
+    };
+
+    # Gesture dispatcher, run as root by the PVE host via the qemu guest
+    # agent (proxmox/power-button in the steam repo). The physical power
+    # button never reaches the guest as ACPI: with GPU passthrough the VM
+    # must not suspend. Map gestures to custom commands here; run user-
+    # session commands as deck with as_deck.
+    file.".local/bin/power-button-gesture" = {
+      executable = true;
+      text = ''
+        #!/bin/bash
         set -u
-        exec >>/tmp/acpi-power-action.log 2>&1
-        echo "=== $(date -Is) event: $*"
-        flock -n /run/acpi-power-action.lock \
-          su deck -c 'XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus /home/deck/.local/bin/switch-steamos-mode' \
-          || echo "skipped: switch already in progress"
+        gesture="''${1:-}"
+        log() { logger -t power-button "$*"; }
+        as_deck() {
+          su deck -c "XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus $*"
+        }
+        log "gesture from host: $gesture"
+        case "$gesture" in
+          "short-pressed once")
+            # toggle game <-> desktop; a switch takes up to ~60s, drop
+            # presses that land while one is still running
+            log "action: switch-steamos-mode"
+            flock -n /run/power-button-switch.lock bash -c '
+              su deck -c "XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus /home/deck/.local/bin/switch-steamos-mode" 2>&1 \
+                | logger -t power-button
+            ' || log "skipped: switch already in progress"
+            ;;
+          "short-pressed twice") log "action: none (TODO)" ;;
+          *)                     log "action: none (unmapped)" ;;
+        esac
       '';
     };
 

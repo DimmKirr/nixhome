@@ -44,7 +44,6 @@
     "lm-studio"
     "plex"
     "vlc"
-    "mqttx"
     # "anydesk" # pinned — upgrade needs newer macOS # TODO: review if pin is still required
     "linear"
     "devin-desktop"

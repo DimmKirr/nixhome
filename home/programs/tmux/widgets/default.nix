@@ -15,6 +15,7 @@
   cpu              = import ./cpu.nix;
   ram              = import ./ram.nix;
   weather          = import ./weather.nix;
+  world-clock      = import ./world-clock.nix;
   kubernetes       = import ./kubernetes.nix;
   git              = import ./git.nix;
   network          = import ./network.nix;

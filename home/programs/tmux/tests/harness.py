@@ -87,6 +87,13 @@ def compose(spec: dict, separators: dict) -> str:
     def fgbg(c, b): return f"#[fg={c},bg={b}]"
     reset = "#[default]"
 
+    if style in ("twoTone", "powerline") and spec["icon"] == "":
+        # Mirror of status-module.nix single-block collapse for icon-less widgets.
+        return (
+            f"{fg(spec['iconBg'])}{s['left']}"
+            f"{fgbg(spec['iconFg'], spec['iconBg'])}{spec['text']}"
+            f"{fg(spec['iconBg'])}{s['right']}{reset}"
+        )
     if style in ("twoTone", "powerline"):
         return (
             f"{fg(spec['iconBg'])}{s['left']}"
@@ -205,6 +212,18 @@ def widget_application(palette, icons, style):
         "style":  style,
     }
 
+def widget_world_clock(palette, icons, style):
+    """Mirror of widgets/world-clock.nix (icon-less single block)."""
+    return {
+        "icon":   "",
+        "iconFg": palette["crust"],
+        "iconBg": palette["mauve"],
+        "text":   " #(<script:world-clock>) ",
+        "textFg": palette["fg"],
+        "textBg": palette["surface_0"],
+        "style":  style,
+    }
+
 def widget_snapshot_tick(palette, icons, style):
     return {
         "icon": "", "iconFg": "default", "iconBg": "default",
@@ -241,6 +260,8 @@ WIDGETS: dict[str, Callable] = {
         args=" #{pane_current_path}"),
     "network": _shell_widget("network",
         {"nerdFont": "󰖩 ", "ascii": "[N] ", "emoji": "📶 ", "none": ""}, "flamingo"),
+
+    "world-clock": widget_world_clock,
 
     # Special
     "snapshot-tick": widget_snapshot_tick,

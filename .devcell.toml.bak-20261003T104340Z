@@ -1,0 +1,114 @@
+# .devcell.toml
+# DevCell project configuration. Optional global defaults at ~/.config/devcell/devcell.toml
+
+[cell]
+# Base stack (one of: base, go, node, python, fullstack, electronics, ultimate)
+stack = "ultimate"
+#
+# Addon modules (from nixhome/modules/): desktop, electronics, financial,
+# graphics, infra, news, nixos, qa-tools, scraping, travel, go, node, python
+# modules = ["electronics", "desktop"]
+#
+# Disable GUI (Xvfb + VNC + browser). GUI is enabled by default.
+# gui = false
+# Timezone (IANA format). If omitted, inherits host $TZ.
+# timezone = "Europe/Prague"
+
+# AI agent configuration — all LLM settings in one place.
+[llm]
+# Route Claude Code through a local ollama instance (Anthropic API compat).
+# Equivalent to: cell claude --ollama
+# use_ollama = false
+#
+# Project context injected into all AI agents (Claude, Codex, OpenCode).
+# Sits on top of CLAUDE.md and agent-native config files.
+system_prompt = """
+Environment: Docker container (cell-nixhome-577)
+Project: /nixhome-577 (alias for /Users/dmitry/dev/nmd/nixhome on host)
+Both paths are bind-mounted from the same host directory and resolve to the same filesystem.
+Working directory is /nixhome-577. If the user mentions host paths like /Users/dmitry/dev/nmd/nixhome/..., they map to /nixhome-577/...
+
+Bind mounts:
+  /nixhome-577 = /Users/dmitry/dev/nmd/nixhome (project source, read-write)
+  /home/dmitry (persistent home, survives container restarts)
+  /home/dmitry/.claude/skills (read-write)
+  /home/dmitry/.claude/commands (read-only, from host)
+  /home/dmitry/.claude/agents (read-only, from host)
+  /etc/devcell/config = /Users/dmitry/.config/devcell (user build config)
+  /Users/dmitry/.config/tmuxp = /Users/dmitry/.config/tmuxp (read-only, from devcell.toml)
+  /Users/dmitry/dev/dimmkirr/addiplay = /Users/dmitry/dev/dimmkirr/addiplay (read-write, from devcell.toml)
+
+Host path mapping (use these to translate paths the user mentions):
+  host: /Users/dmitry/dev/nmd/nixhome → container: /Users/dmitry/dev/nmd/nixhome
+  host: /Users/dmitry → container: /home/dmitry
+  host: /Users/dmitry/.config/tmuxp → container: /Users/dmitry/.config/tmuxp
+  host: /Users/dmitry/dev/dimmkirr/addiplay → container: /Users/dmitry/dev/dimmkirr/addiplay
+
+Constraints:
+  - /opt/devcell is the nix environment — do not modify at runtime
+  - Nix profile: /opt/devcell/.local/state/nix/profiles/profile
+"""
+
+# Git identity forwarded into the container.
+# If omitted and no GIT_AUTHOR_* env vars are set, ~/.config/git/config is mounted read-only instead.
+# [git]
+# author_name = "Your Name"
+# author_email = "you@example.com"
+# committer_name = "Your Name"   # defaults to author_name if omitted
+# committer_email = "you@example.com"  # defaults to author_email if omitted
+
+# 1Password documents whose fields are passed into the container as env vars.
+# Requires `op` CLI on the host. Each field in the document becomes an env var:
+# e.g. a field labeled "API_KEY" with value "sk-123" → env var API_KEY=sk-123.
+[op]
+documents = ["prod-nmd-infra"]
+
+# AWS credential scoping. When true, credentials are scoped to read-only
+# via IAM session policy. All AWS tools (cli, terraform, SDKs, MCP servers)
+# get read-only creds. Default: false (full access).
+# [aws]
+# read_only = true
+
+# Port forwarding from container to host. Bare port = same on both sides.
+# [ports]
+# forward = ["3000", "8080:3000"]
+
+# Extra environment variables forwarded into the container.
+[env]
+# GITHUB_TOKEN = "ghp_xxx"
+# ANTHROPIC_API_KEY = "sk-ant-xxx"
+
+# mise runtime settings forwarded as MISE_<UPPER_KEY> env vars.
+# See: https://mise.jdx.dev/configuration.html
+[mise]
+# trusted_config_paths = "/"
+# idiomatic_version_file = "true"
+
+# Extra volume mounts appended to docker run.
+[[volumes]]
+mount = "/Users/dmitry/.config/tmuxp:/Users/dmitry/.config/tmuxp:ro"
+
+[[volumes]]
+mount = "/Users/dmitry/dev/dimmkirr/addiplay:/Users/dmitry/dev/dimmkirr/addiplay"
+#
+# [[volumes]]
+# mount = "~/.ssh:/home/user/.ssh:ro"
+
+[llm.models]
+#default = "ollama/qwen3-coder:30b"
+
+[llm.models.providers.ollama]
+models = ["qwen3-coder:30b", "qwen3-coder:30b-128k", "glm-4.7-flash:latest", "deepseek-r1:32b", "qwen2.5-coder:32b", "qwen3:8b", "qwen3:8b-128k", "qwen3-coder-next:latest", "qwen3-coder-next:latest-128k", "qwen3:0.6b"]
+
+
+# npm packages installed in the container. Edit and run 'cell build'.
+# All core tools (claude-code, codex, slidev, patchright, opentofu-mcp) are
+# managed via nix modules. Only add packages here that are NOT in nixhome.
+# [packages.npm]
+# "some-tool" = "^1.0.0"
+
+# Python packages installed in the container. Edit and run 'cell build'.
+[packages.python]
+"pre-commit" = "*"
+# "httpie" = "*"
+# "pipx" = "*"

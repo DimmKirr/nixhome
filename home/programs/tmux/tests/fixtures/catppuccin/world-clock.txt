@@ -1,0 +1,1 @@
+#[fg=#cba6f7]#[fg=#11111b,bg=#cba6f7] #(<script:world-clock>) #[fg=#cba6f7]#[default]

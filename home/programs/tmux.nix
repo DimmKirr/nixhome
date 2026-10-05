@@ -478,10 +478,12 @@ in {
         set -g message-style       'bg=${theme.palette.surface_2},fg=${theme.palette.fg}'
         set -g status-interval     5
         set -g status-left-length  100
-        # 100 (was 300). Combined with #{E:status-right} on format[1] this
-        # avoids mid-escape truncation on narrow thin-client terminals.
+        # 500 (was 100, originally 300). Raised to fit the world-clock widget.
+        # format[1] renders via #{E:status-right}, which ignores this limit;
+        # it only matters for the stock status-right rendering. If thin-client
+        # mid-escape truncation returns, drop it back to 100.
         # (Ticket: tmux-thin-ssh-client-status-bar-distortion)
-        set -g status-right-length 100
+        set -g status-right-length 500
 
         # bold (not reverse) — `reverse` swaps fg/bg per cell, which flickers
         # on thin SSH clients (Termius, JuiceSSH, mosh). bold matches the
@@ -499,7 +501,7 @@ in {
         # If thin-client distortion returns: trim status-right to a smaller
         # widget set (e.g. `[ "date-time" ]`) and inspect the test harness
         # output under home/programs/tmux/tests/.
-        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" ]}'
+        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" "world-clock" ]}'
         # Periodic auto-save tick — MUST come after the `set -g status-right`
         # above, otherwise that overwrite clobbers this appended #() command.
         # Previously lived inside a plugin's extraConfig where it ran BEFORE

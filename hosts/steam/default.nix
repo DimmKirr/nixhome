@@ -15,6 +15,13 @@
   ...
 }:
 let
+  # Legacy GFN patches (vendor.js clientPlatformName=Windows / vangogh off /
+  # grc.enable=14, GeronimoDebugConfig codec=av1, libGeronimo binary patches).
+  # Off: the app is restored to stock and 4K@120 comes from the device-identity
+  # spoof in gfn-game-launcher's startgfn.sh instead (GFN on SteamOS picks its
+  # mode table by DMI model; method from gitlab.com/anthrgk/geforcenow-installer-linux).
+  gfnLegacyPatches = false;
+
   # GE-Proton: full DualSense haptics + controller-speaker support (11-4+),
   # 11-5 fixes the EAC regression from 11-4. Newer than nixpkgs' proton-ge-bin.
   # Update: bump version, refresh hash from the release's *-x86_64.sha512sum
@@ -1076,7 +1083,21 @@ in
   # 1. Disable vangogh GPU detection (Steam Deck APU)
   # 2. Force clientPlatformName="Windows" so server permits AV1 (grc.enable=14)
   # 3. Strip SRI integrity attributes + clear CefCache
-  home.activation.patchGfnIdentity = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+  home.activation.patchGfnIdentity = lib.hm.dag.entryAfter [ "reloadSystemd" ] (if !gfnLegacyPatches then ''
+    # Legacy patches disabled: put back any stock files the old patcher saved
+    for d in "$HOME/.local/share/flatpak/app/com.nvidia.geforcenow" \
+             "/var/lib/flatpak/app/com.nvidia.geforcenow"; do
+      [ -d "$d" ] || continue
+      while IFS= read -r orig; do
+        mv -f "$orig" "''${orig%.orig}" && echo "gfn-unpatch: restored ''${orig%.orig}"
+      done < <(find "$d" -name '*.orig' 2>/dev/null)
+      find "$d" -name GeronimoDebugConfig.txt -delete 2>/dev/null
+    done
+    STATE_DIR="$HOME/.var/app/com.nvidia.geforcenow/.local/state/NVIDIA/GeForceNOW"
+    rm -f "$STATE_DIR/GeronimoDebugConfig.txt" "$STATE_DIR/logs/GeronimoDebugConfig.txt"
+    rm -rf "$STATE_DIR/CefCache"
+    echo "gfn-unpatch: stock app (legacy patches off; 4K120 via startgfn.sh identity spoof)"
+  '' else ''
     MALL_DIR=""
     for d in "$HOME/.local/share/flatpak/app/com.nvidia.geforcenow" \
              "/var/lib/flatpak/app/com.nvidia.geforcenow"; do
@@ -1178,7 +1199,7 @@ in
     else
       echo "gfn-patch: GFN flatpak not found, skipping"
     fi
-  '';
+  '');
 
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];

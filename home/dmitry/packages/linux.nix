@@ -20,7 +20,8 @@ with pkgs; [
   tigervnc       # vncviewer (broken on darwin)
 
   # Virtualization
-  (import ./qemu-rc.nix { inherit pkgs pkgsEdge; })
+  # Stock edge QEMU (11.1.2+, binary cache)
+  pkgsEdge.qemu
 
   # Additional Linux tools
   alsa-utils     # Audio control

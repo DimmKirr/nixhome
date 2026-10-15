@@ -158,7 +158,7 @@ let
 
   # Unstable channel packages
   unstable = with pkgsUnstable; [
-    jetbrains-toolbox
+    # jetbrains-toolbox: darwin.nix (Linux tarball for the pinned version is gone from the JetBrains CDN)
     vhs
     yt-dlp
     k9s

@@ -28,8 +28,10 @@ with pkgs; [
   discord      # x86_64 only, doesn't work on aarch64-linux
   seclists     # Large wordlist package - only on darwin, too big for devbox
 ] ++ (with pkgsUnstable; [
+  jetbrains-toolbox
   tart
-  (import ./qemu-rc.nix { inherit pkgs pkgsEdge; })
+  # Stock edge QEMU (11.1.2+, binary cache)
+  pkgsEdge.qemu
   lima
   monitorcontrol
   betterdisplay

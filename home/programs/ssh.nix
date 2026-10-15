@@ -9,8 +9,10 @@
   # `settings`.
   settings = {
     # Default settings for all hosts
-    "*" = {
-      # Use 1Password SSH agent (serves keys from vault + hardware keys)
+    "*" = pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+      # Use 1Password SSH agent (serves keys from vault + hardware keys).
+      # macOS only: Linux hosts have no 1Password socket and must fall back to
+      # $SSH_AUTH_SOCK (e.g. an agent forwarded with `ssh -A`).
       IdentityAgent = ''"~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"'';
       # Use internal FIDO2 provider for security keys
       # Disabled: IntelliJ prompts for it too often, 1Password handles auth instead
@@ -29,6 +31,13 @@
     #   IdentitiesOnly = "yes";
     #   IdentityFile = "~/.ssh/id_ed25519.pub";
     # };
+
+    "nixie nixie.lan" = {
+      User = "dmitry";
+      # Forward the agent so git/ssh on nixie can use the Mac's keys
+      # (server side: AllowAgentForwarding in hosts/nixie/default.nix).
+      ForwardAgent = "yes";
+    };
 
     "automationd.lan" = {
       User = "dmitry";

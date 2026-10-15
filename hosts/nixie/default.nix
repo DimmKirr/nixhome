@@ -91,6 +91,9 @@
     traceroute
   ];
 
+  # Passwordless sudo for wheel: remote `nixos-rebuild switch` via task host:nixie:apply
+  security.sudo.wheelNeedsPassword = false;
+
   # Programs
   programs.zsh.enable = true;
   programs.gnupg.agent.enable = true;
@@ -104,6 +107,9 @@
       PermitRootLogin = "no";
       PasswordAuthentication = false;
       KbdInteractiveAuthentication = false;
+      # Accept a forwarded agent (`ssh -o ForwardAgent=yes` / `ssh -A`) so the
+      # Mac's 1Password keys are usable on this host without storing keys here.
+      AllowAgentForwarding = true;
     };
   };
 

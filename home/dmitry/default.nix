@@ -6,6 +6,7 @@
   pkgsLegacy,
   nixvim,
   lib,
+  config,
   ...
 }: {
   # NOTE: Do NOT use pkgs.stdenv.isDarwin in imports section - causes infinite recursion
@@ -87,6 +88,12 @@
     starship = import ../programs/starship.nix { inherit pkgs; };
   };
 
+  # Public half of the 1Password-managed ed25519 key. With IdentitiesOnly=yes an
+  # IdentityFile pointing at a .pub makes the agent offer only that key, so the
+  # YubiKey SK key is never tried (no touch prompt) for hosts that pin it.
+  home.file.".ssh/id_ed25519_1password.pub".text =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAgqQTngjpLZYFBBBu2z7N5s7+LCUjWZCfqkx5UrblKT dmitry@1password\n";
+
   # OpenCommit (oco) — AI commit messages via OpenRouter
   home.file.".opencommit".text = ''
     OCO_AI_PROVIDER=openrouter
@@ -158,6 +165,31 @@
     };
   };
 
+  # The home-manager colima module gives the launchd agent a nix-only PATH.
+  # Colima gates nestedVirtualization (and rosetta) on host checks that shell
+  # out to /usr/sbin/system_profiler and /usr/bin/pgrep; when those are not
+  # found the check fails silently and the setting never reaches lima.yaml.
+  # Keep the module's PATH and append the macOS system dirs.
+  launchd.agents = lib.optionalAttrs pkgs.stdenv.isDarwin (
+    let
+      c = config.services.colima;
+      modulePath = lib.makeBinPath [
+        c.package
+        c.perlPackage
+        c.dockerPackage
+        c.sshPackage
+        c.coreutilsPackage
+        c.curlPackage
+        c.bashPackage
+        c.kubectlPackage
+        pkgs.darwin.DarwinTools
+      ];
+    in {
+      colima-default.config.EnvironmentVariables.PATH =
+        lib.mkForce "${modulePath}:/usr/sbin:/usr/bin:/bin:/sbin";
+    }
+  );
+
   # All modules imported unconditionally - each module handles platform logic internally
   imports = [
     ../programs/ghostty.nix
@@ -175,6 +207,16 @@
 
   devcell = {
     enable = true;
+    # Primary binary `devcell`, `cell` kept as an alias. Mirrors the intended
+    # upstream rename; drop this override once devcell-sh/devcell ships it.
+    package = inputs.devcell.packages.${pkgs.stdenv.hostPlatform.system}.cell.overrideAttrs (old: {
+      pname = "devcell";
+      postInstall = ''
+        mv $out/bin/cmd $out/bin/devcell
+        ln -s devcell $out/bin/cell
+      '';
+      meta = old.meta // { mainProgram = "devcell"; };
+    });
     cell.default_command = "claude";
     env = {
       CLAUDE_CODE_DISABLE_AGENT_VIEW = "1";
@@ -185,7 +227,8 @@
     };
     # Schema: [cell] volumes = ["/host", "/host:/container", "/host:/container:ro"].
     # Top-level [[volumes]] mount = … is deprecated.
-    cell.volumes = [
+    # macOS paths only; Linux hosts (nixie) get no extra volumes for now.
+    cell.volumes = lib.optionals pkgs.stdenv.isDarwin [
       "/Users/dmitry/dev/dimmkirr/skills/"
       "/Users/dmitry/dev/kirr/skills/"
       "/Users/dmitry/dev/mad/skills/"
@@ -219,6 +262,39 @@
       - Any scripts you need to create for executing actions (e.g. Python scripts, shell scripts, temporary wrappers) must reside in `.scratch/tools/<task-you-needed-it-for>/<tool-name>.<ext>`. This structure keeps the repository clean from interim scripts and tools.
       - Any screenshots taken during visual QA should go into `.scratch/screenshots/<dateISO>/<datetimeISO>-<ticket|purpose>-<image-content-desc>-<index>.<ext>`.
       - Any illustrations or generated images should go into `.scratch/illustrations/<dateISO>/<datetimeISO>-<ticket|purpose>-<image-content-desc>-<index>.<ext>`.
+
+      # Product research and specifications
+
+      The `.product/` directory holds product (non-code) research and specifications about the product. Files cross-link each other via relative markdown links.
+
+      Every `.product/*.md` file (except `research/`) has two parts, separated by a `---` line:
+
+      1. Desired state: the ideal we aspire to, kept current. Rewrite it in place, don't append.
+      2. Changes needed: an append-only log, one `## <dateISO>: <change title>` section per session. Each entry lists the gap between the desired state and reality, with what to change and where.
+
+      ```markdown
+      # Landing
+      ## Voice rules
+      ...
+      ## Headline
+      ...
+
+      ---
+
+      ## 2026-09-09: Needs README Copy Update
+      ...
+      ## 2026-09-10: Needs Website Copy Update
+      ...
+      ```
+
+      - `.product/research/<dateISOUTC>/<researchResultFile>.md`: raw research results, one file per research question.
+      - `.product/FEATURES.md`: what a person downloading or using the product sees. Follows strict 2026 marketing: no long list of equally weighted features. Exactly 3 killer features, then 2 additional ones (5 well-defined features total). Links to the personas each feature serves.
+      - `.product/LANDING.md`: what a visitor gets on the landing (README.md or website): headline, value proposition, killer features, social proof, call to action. Derived from and links to `FEATURES.md` and `PERSONAS.md`.
+      - `.product/VOCABULARY.md`: dry list of product terminology (term + one-line definition) and rules on terms and phrasings to avoid. No marketing prose. All other `.product/` files and product copy follow it.
+      - `.product/PERSONAS.md`: the product's personas. Links to the features that matter to each persona.
+      - `.product/COMPETITION.md`: top 3 direct (1:1) competitors and 10 market-adjacent products in total (including those 3), with each one's strong sides.
+      - `.product/MARKET.md`: market conditions, demands and requirements, backed by data and source links.
+      - `.product/launches/<dateISO>/<platform>.md`: launches (marketing campaigns) per platform. Link supporting data to the other `.product/` files.
     '';
   };
 }

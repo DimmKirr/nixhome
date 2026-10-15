@@ -64,6 +64,8 @@ in {
 
   # Import reusable modules
   imports = [
+    ../../modules/darwin/power.nix
+    ../../modules/darwin/replayd.nix
     ../../modules/darwin/services.nix
     ../../modules/darwin/setapp.nix
     # ../../modules/darwin/karabiner-elements.nix  # Custom module doesn't register app bundles properly

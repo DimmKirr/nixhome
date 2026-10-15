@@ -212,12 +212,17 @@ def widget_application(palette, icons, style):
         "style":  style,
     }
 
-def widget_world_clock(palette, icons, style):
+def _world_clock(accent):
     """Mirror of widgets/world-clock.nix (icon-less single block)."""
+    def factory(palette, icons, style):
+        return widget_world_clock(palette, icons, style, accent)
+    return factory
+
+def widget_world_clock(palette, icons, style, accent="mauve"):
     return {
         "icon":   "",
         "iconFg": palette["crust"],
-        "iconBg": palette["mauve"],
+        "iconBg": palette[accent],
         "text":   " #(<script:world-clock>) ",
         "textFg": palette["fg"],
         "textBg": palette["surface_0"],
@@ -261,7 +266,9 @@ WIDGETS: dict[str, Callable] = {
     "network": _shell_widget("network",
         {"nerdFont": "󰖩 ", "ascii": "[N] ", "emoji": "📶 ", "none": ""}, "flamingo"),
 
-    "world-clock": widget_world_clock,
+    "world-clock":    widget_world_clock,
+    "world-clock-ny": _world_clock("mauve"),
+    "world-clock-la": _world_clock("pink"),
 
     # Special
     "snapshot-tick": widget_snapshot_tick,

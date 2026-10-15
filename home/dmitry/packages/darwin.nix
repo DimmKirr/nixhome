@@ -6,6 +6,8 @@
   ...
 }:
 with pkgs; [
+  # Wine and Winetricks come from homebrew.nix; this adds the WebView2 verb.
+  (callPackage ../../../pkgs/winetricks-webview2 { })
   # mas # managed by homebrew (nix-darwin auto-installs via brew when masApps is non-empty)
   google-fonts
   defaultbrowser

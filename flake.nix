@@ -42,7 +42,13 @@
     nix-flatpak.url = "github:gmodena/nix-flatpak";
 
     devcell = {
-      url = "github:devcell-sh/devcell/feature/wip";
+      # Pinned to main@c87f6d5 (2026-09-25): first commit with `cell.volumes`
+      # (schema v0.0.0) and the last one where `cell` builds under nix.
+      #   - v0.9.0 (latest release): `cell` fails to compile, no `cell.volumes`.
+      #   - e39378e..6181db8: go.mod not tidy, go-modules step fails.
+      #   - 2990d98+: imports gitignored, generated api/swagger.
+      # Unpin once upstream main builds again.
+      url = "github:devcell-sh/devcell/c87f6d58b47987a61419f5e543c9ee0db7fb27f4";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

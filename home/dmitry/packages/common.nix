@@ -32,7 +32,6 @@ let
     xz
     kubectl
     k6
-    obsidian
     git
     git-filter-repo
     git-lfs
@@ -206,6 +205,7 @@ let
     go-task
     opencommit
     cliamp # Terminal Winamp - retro terminal music player
+    obsidian # edge for newer releases (stable lags; macOS spellcheck bug forum#107878)
   ];
   # Local script: per-session tmux snapshot tool (replaces bash tmuxsave pipeline).
   # Tests live next to the script: home/scripts/tmux/snapshot/test_snapshot.py

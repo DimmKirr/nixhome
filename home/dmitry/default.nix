@@ -125,6 +125,7 @@
           cpu = 8;
           memory = 24;
           disk = 120;
+          rootDisk = 20; # restart does not apply start's default for omitted settings
           runtime = "docker";
           vmType = "vz";
           rosetta = true;
@@ -182,16 +183,18 @@
       CLAUDE_CODE_DISABLE_MOUSE = "1";
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
     };
-    volumes = [
-      { mount = "/Users/dmitry/dev/dimmkirr/skills/"; }
-      { mount = "/Users/dmitry/dev/kirr/skills/"; }
-      { mount = "/Users/dmitry/dev/mad/skills/"; }
-      { mount = "/Users/dmitry/dev/ptc/skills/"; }
-      { mount = "/Users/dmitry/dev/kiwa/skills/"; }
-      { mount = "/Users/dmitry/dev/fam/skills/"; }
-      { mount = "/Users/dmitry/dev/nmd/private-skills/"; }
-      { mount = "/Users/dmitry/dev/hazelops/skills/"; }
-      { mount = "/Users/dmitry/.cache:/home/dmitry/.cache"; }
+    # Schema: [cell] volumes = ["/host", "/host:/container", "/host:/container:ro"].
+    # Top-level [[volumes]] mount = … is deprecated.
+    cell.volumes = [
+      "/Users/dmitry/dev/dimmkirr/skills/"
+      "/Users/dmitry/dev/kirr/skills/"
+      "/Users/dmitry/dev/mad/skills/"
+      "/Users/dmitry/dev/ptc/skills/"
+      "/Users/dmitry/dev/kiwa/skills/"
+      "/Users/dmitry/dev/fam/skills/"
+      "/Users/dmitry/dev/nmd/private-skills/"
+      "/Users/dmitry/dev/hazelops/skills/"
+      "/Users/dmitry/.cache:/home/dmitry/.cache"
     ];
     # Layered on top of Claude Code's built-in system prompt (--append-system-prompt-file).
     # Do NOT use llm.system_prompt / prompt here — that REPLACES the built-in prompt entirely.

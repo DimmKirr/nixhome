@@ -46,13 +46,14 @@
     ".scratch"
     ".devcell"
     ".local"
-    ".devcell.toml"
+    ".devcell.toml*"
     "CLAUDE.md"
     ".worktrees"
     ".env"
     ".playwright-mcp"
     ".vagrant"
     ".tools"
-    "core"
+    "/core" # Node.js / Claude Code core dump in repo root
+    "/core.[0-9]*" # same, with PID suffix (kernel.core_uses_pid)
   ];
 }

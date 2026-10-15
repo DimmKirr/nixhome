@@ -1,0 +1,88 @@
+# Based on devcell-sh/go-winkit winpe/fetch_webview2.go.
+# NuGet packages are ZIPs; runtime + core together form the fixed runtime.
+# Do not select using uname: macOS ARM hosts commonly run x64 Wine.
+w_metadata webview2fixed dlls \
+    title="WebView2 fixed runtime 154.0.4258.53 (x86/x64/ARM64)" \
+    publisher="Microsoft" \
+    year="2026" \
+    media="download"
+
+load_webview2fixed()
+{
+    wv2_version=154.0.4258.53
+    wv2_machine=$("${WINE}" cmd.exe /c 'echo %PROCESSOR_ARCHITECTURE%') || w_die "Cannot determine Wine's Windows architecture"
+    wv2_machine=$(printf '%s' "${wv2_machine}" | tr -d '\r\n ' | tr '[:upper:]' '[:lower:]')
+    case "${wv2_machine}" in
+        amd64) wv2_arch=x64 ;;
+        arm64) wv2_arch=arm64 ;;
+        x86) wv2_arch=x86 ;;
+        *) w_die "Unsupported Wine Windows architecture: ${wv2_machine}" ;;
+    esac
+
+    case "${wv2_arch}" in
+        x86)
+            wv2_runtime_hash=6c310607f72c1a506521010e525bff6200b721662da9c6790eb2e98aa47dfee8
+            wv2_core_hash=da2bbe847a3c5a079a20dce20273b58f2b6fe43c0cd178191fc7ae1ff32c7b5e
+            ;;
+        x64)
+            wv2_runtime_hash=716e15349a76511fad9547b3e84b793f87f9645ece3fe0c1c31172317331e81c
+            wv2_core_hash=d7d59d53a9bc5a905e35a5dde2ef26eee89c801a256e5f58915788ace33480c0
+            ;;
+        arm64)
+            wv2_runtime_hash=eac990916b025bc4f53fdb2c40403873414edab54bc2fdfea35cff8fdd83503c
+            wv2_core_hash=7a4a747dd6b35e221255e60e77a005f2d836761f6dadbd3ec24f96b9de5eb085
+            ;;
+    esac
+
+    wv2_stage="${W_TMP}/webview2"
+    w_try mkdir -p "${wv2_stage}"
+    for wv2_part in runtime core; do
+        wv2_pkg="webview2.runtime.${wv2_arch}"
+        wv2_hash=${wv2_runtime_hash}
+        if [ "${wv2_part}" = core ]; then
+            wv2_pkg="${wv2_pkg}.core"
+            wv2_hash=${wv2_core_hash}
+        fi
+        wv2_file="${wv2_pkg}.${wv2_version}.nupkg"
+        w_download "https://api.nuget.org/v3-flatcontainer/${wv2_pkg}/${wv2_version}/${wv2_file}" "${wv2_hash}"
+        w_try unzip -oq "${W_CACHE}/${W_PACKAGE}/${wv2_file}" 'contentFiles/any/any/WebView2/*' -d "${wv2_stage}"
+    done
+
+    wv2_source="${wv2_stage}/contentFiles/any/any/WebView2"
+    for wv2_required in msedgewebview2.exe msedge.dll icudtl.dat "EBWebView/${wv2_arch}/EmbeddedBrowserWebView.dll"; do
+        test -s "${wv2_source}/${wv2_required}" || w_die "Incomplete WebView2 package: missing ${wv2_required}"
+    done
+    for wv2_other in x86 x64 arm64; do
+        if [ "${wv2_other}" != "${wv2_arch}" ]; then
+            w_try rm -rf "${wv2_source}/EBWebView/${wv2_other}"
+        fi
+    done
+
+    wv2_dest="${WINEPREFIX}/drive_c/Program Files/Microsoft/EdgeWebView/Application/${wv2_version}"
+    w_try mkdir -p "${wv2_dest}"
+    w_try cp -R "${wv2_source}/." "${wv2_dest}/"
+
+    # Wails reads ClientState/EBWebView in the 32-bit registry view and parses
+    # the last directory component as the version. Register both views via
+    # w_try_regedit; keep the standard policy for Microsoft SDK consumers too.
+    # Forward slashes are accepted in Windows paths and avoid .reg escaping.
+    cat > "${W_TMP}/webview2.reg" <<REG
+REGEDIT4
+
+[HKEY_CURRENT_USER\Software\Policies\Microsoft\Edge\WebView2\BrowserExecutableFolder]
+"*"="C:/Program Files/Microsoft/EdgeWebView/Application/${wv2_version}"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}]
+"EBWebView"="C:/Program Files/Microsoft/EdgeWebView/Application/${wv2_version}"
+REG
+    # Optional workaround reported for Wine's DComposition crash. It is scoped
+    # to the browser subprocess, not the application or the whole prefix.
+    if [ "${WEBVIEW2_WINE_WIN7:-0}" = 1 ]; then
+        cat >> "${W_TMP}/webview2.reg" <<'REG'
+
+[HKEY_CURRENT_USER\Software\Wine\AppDefaults\msedgewebview2.exe]
+"Version"="win7"
+REG
+    fi
+    w_try_regedit "${W_TMP_WIN}\\webview2.reg"
+}

@@ -16,6 +16,9 @@
   ram              = import ./ram.nix;
   weather          = import ./weather.nix;
   world-clock      = import ./world-clock.nix;
+  # One block per zone so each gets its own color.
+  world-clock-ny   = args: import ./world-clock.nix (args // { zones = [ "America/New_York" ];    accent = "mauve"; });
+  world-clock-la   = args: import ./world-clock.nix (args // { zones = [ "America/Los_Angeles" ]; accent = "pink"; });
   kubernetes       = import ./kubernetes.nix;
   git              = import ./git.nix;
   network          = import ./network.nix;

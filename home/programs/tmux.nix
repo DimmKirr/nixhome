@@ -501,7 +501,7 @@ in {
         # If thin-client distortion returns: trim status-right to a smaller
         # widget set (e.g. `[ "date-time" ]`) and inspect the test harness
         # output under home/programs/tmux/tests/.
-        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" "world-clock" ]}'
+        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" "world-clock-ny" "world-clock-la" ]}'
         # Periodic auto-save tick — MUST come after the `set -g status-right`
         # above, otherwise that overwrite clobbers this appended #() command.
         # Previously lived inside a plugin's extraConfig where it ran BEFORE

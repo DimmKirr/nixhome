@@ -9,6 +9,8 @@
 { lib, pkgs, palette, icons, style
 , zones ? [ "America/New_York" "America/Los_Angeles" ]
 , format ? "%H:%M %Z"
+  # Palette slot name for the block color, so each zone can be its own block.
+, accent ? "mauve"
 }:
 let
   base = import ./_base.nix { inherit lib; };
@@ -31,7 +33,7 @@ base.defaults palette // {
   # No icon — same plain presentation as date-time; zone abbreviations
   # identify each clock.
   icon   = "";
-  iconBg = palette.mauve;
+  iconBg = palette.${accent};
   iconFg = palette.crust;
   text   = " #(${raw}/bin/tmux-widget-world-clock) ";
   inherit style;

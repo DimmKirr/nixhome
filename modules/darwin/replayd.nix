@@ -20,18 +20,19 @@ let
       echo "disable-replayd: macOS rejected the persistent disable for $service" >&2
       exit 1
     fi
+    # SIP forbids bootout of Apple services (error 150). The persistent disable
+    # is what matters; it takes full effect at next login/reboot. Best-effort
+    # kill the running instance: launchd won't respawn a disabled job.
     if /bin/launchctl print "$service" >/dev/null 2>&1; then
-      if ! /bin/launchctl bootout "$service"; then
-        echo "disable-replayd: disabled for future loads, but bootout failed; current job may still be running" >&2
-        exit 1
+      if /bin/launchctl bootout "$service" 2>/dev/null; then
+        echo "disable-replayd: $service disabled and unloaded"
+      else
+        /usr/bin/pkill -x replayd 2>/dev/null || true
+        echo "disable-replayd: $service disabled; SIP blocked bootout, effective after next login" >&2
       fi
+    else
+      echo "disable-replayd: $service disabled (not loaded)"
     fi
-    if /bin/launchctl print "$service" >/dev/null 2>&1; then
-      echo "disable-replayd: service is still registered after bootout" >&2
-      exit 1
-    fi
-    /bin/launchctl print-disabled "$domain"
-    echo "disable-replayd: $service disabled and unloaded"
   '';
 in {
   # Run on every switch, including when this module was already enabled.
@@ -43,7 +44,7 @@ in {
   # Covers switches made with no GUI session, and subsequent logins.
   launchd.user.agents.disable-replayd = {
     serviceConfig = {
-      ProgramArguments = [ disableReplayd ];
+      ProgramArguments = [ "${disableReplayd}" ];
       RunAtLoad = true;
       StandardOutPath = "/Users/${user}/Library/Logs/disable-replayd.log";
       StandardErrorPath = "/Users/${user}/Library/Logs/disable-replayd.log";

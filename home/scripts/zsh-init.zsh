@@ -3,6 +3,14 @@ if [ -n "$GHOSTTY_RESOURCES_DIR" ]; then
     builtin source "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/ghostty-integration"
 fi
 
+# Platform flag for macOS-only sections below (1Password agent socket,
+# Hubstaff, Docker VM reset). This file is loaded verbatim on both the Mac
+# and NixOS hosts (nixie), so anything touching /Applications, ~/Library or
+# colima must be gated on it.
+# TODO: Migrate to nix domain split (per-domain home-manager modules gated
+# with pkgs.stdenv.isDarwin instead of runtime checks in one zsh blob).
+[[ "$OSTYPE" == darwin* ]] && _IS_DARWIN=1 || _IS_DARWIN=""
+
 # Env Vars
 export EDITOR='nvim'
 export NIX_BUILD_SHELL=$SHELL
@@ -375,7 +383,8 @@ tmuxp-kill() {
     done
 }
 
-# Hubstaff aliases
+# Hubstaff aliases (macOS only: HubstaffCLI ships inside the .app bundle)
+if [[ -n "$_IS_DARWIN" ]]; then
 alias hs="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI"
 alias hs-map-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3497711"
 alias hs-hzl-start="/Applications/Hubstaff.app/Contents/MacOS/HubstaffCLI start_project 3497760"
@@ -455,11 +464,17 @@ hs-dimm-toggle() {
 hs-kirr-toggle() {
     _hs_toggle 3956771
 }
+fi # _IS_DARWIN (Hubstaff)
 
 cleandocker() {
   if [[ "$1" == "-f" ]]; then
-    # Full reset - destroy and recreate the VM
-    if command -v colima &>/dev/null && colima status &>/dev/null; then
+    # Full reset - destroy and recreate the VM (macOS runtimes only; on Linux
+    # docker is native, there is no VM to reset)
+    if [[ -z "$_IS_DARWIN" ]]; then
+      echo "cleandocker -f is macOS-only (Colima / Docker Desktop VM reset)."
+      echo "Run soft cleanup instead: cleandocker"
+      return 1
+    elif command -v colima &>/dev/null && colima status &>/dev/null; then
       echo "Colima detected. Deleting VM..."
       colima delete -f
       echo "Recreating Colima VM..."
@@ -896,8 +911,11 @@ cm() {
     claude -p "$prompt" 2> >(grep -v 'claude-code:unrecognized_model\|connectors are disabled' >&2)
 }
 
-# Use 1Password SSH agent
-export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock
+# Use 1Password SSH agent (macOS only). On Linux hosts keep whatever sshd set
+# (a forwarded agent via `ssh -A`) instead of clobbering it with a missing path.
+if [[ -n "$_IS_DARWIN" ]]; then
+  export SSH_AUTH_SOCK=~/Library/Group\ Containers/2BUA8C4S2C.com.1password/t/agent.sock
+fi
 
 # vifm: cd into the dir vifm was last in (mc-style "exit drops you here").
 # Aliased as `r` to mirror the common mc workflow: r → browse → q → land.

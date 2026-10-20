@@ -1234,3 +1234,329 @@ tasks:
         # ─── inventory ─────────────────────────────────────────────────────
         ls -1 "$DEST"
         printf '\n✓ debug dump at: %s\n' "$DEST"
+
+  # ── Tests ───────────────────────────────────────────────────────────
+
+  test:tmux-snapshot:persistence:
+    desc: >-
+      RED/GREEN test: CELL_IDs must survive save->reload->save when other
+      sessions offset the pane_id counter, and each pane must get a unique
+      CELL_ID. Fails on macOS (SIP blocks ps -E env reading).
+    dir: '{{.ROOT_DIR}}/home/scripts/tmux/snapshot'
+    vars:
+      LOG: '{{.ROOT_DIR}}/.scratch/debug/test-tmux-snapshot-persistence.log'
+    cmds:
+      - |
+        set -eu
+        mkdir -p "$(dirname "{{.LOG}}")"
+        python3 -c "
+        import tempfile, time, os, subprocess, re, sys, json, platform
+        from pathlib import Path
+        from datetime import datetime, timezone
+        import snapshot as snap
+
+        log_path = '{{.LOG}}'
+        log = {}
+        log['timestamp'] = datetime.now(timezone.utc).isoformat()
+        log['platform'] = platform.platform()
+        log['python'] = sys.version
+        errors = []
+
+        tmp = tempfile.mkdtemp(prefix='snap-red-')
+        s1, s2 = f'{tmp}/s1.sock', f'{tmp}/s2.sock'
+        # Strip CELL_ID from env so spawned shells don't inherit a stale
+        # value from the caller's tmux pane.
+        clean_env = {k: v for k, v in os.environ.items() if k != 'CELL_ID'}
+        clean_env['TERM'] = 'xterm-256color'
+        env = clean_env
+        log['tmpdir'] = tmp
+        log['caller_had_cell_id'] = 'CELL_ID' in os.environ
+        log['caller_cell_id'] = os.environ.get('CELL_ID', '')
+
+        def T(sock, *a):
+            r = subprocess.run(
+                ['tmux','-S',sock]+list(a),
+                capture_output=True, text=True, env=env)
+            return r
+
+        # Noisy neighbor: eats pane_ids %0..%5
+        T(s1,'new-session','-d','-s','neighbor','-x','200','-y','48')
+        for _ in range(5): T(s1,'new-window','-t','neighbor')
+        time.sleep(0.2)
+
+        # Verify neighbor got the low pane_ids
+        nbr = T(s1,'list-panes','-s','-t','neighbor','-F','#{pane_id}')
+        log['neighbor_pane_ids'] = nbr.stdout.strip().splitlines()
+
+        # Target session on SAME server (panes should get %6+)
+        T(s1,'new-session','-d','-s','rt','-x','200','-y','48','-n','win')
+        r_sv = T(s1,'split-window','-v','-t','rt:win')
+        log['split_v_rc'] = r_sv.returncode
+        if r_sv.returncode != 0:
+            log['split_v_stderr'] = r_sv.stderr
+        # Find the top pane by %pane_id (not dot-index, which varies by platform)
+        top_pane_out = T(s1,'list-panes','-t','rt:win','-F','#{pane_top} #{pane_id}')
+        top_lines = [l for l in top_pane_out.stdout.strip().splitlines() if l]
+        top_id = sorted((int(l.split()[0]), l.split()[1]) for l in top_lines)[0][1]
+        r_sh = T(s1,'split-window','-h','-t',top_id)
+        log['split_h_rc'] = r_sh.returncode
+        log['split_h_target'] = top_id
+        if r_sh.returncode != 0:
+            log['split_h_stderr'] = r_sh.stderr
+        time.sleep(0.3)
+
+        # Query live panes before save
+        live_pre = T(s1,'list-panes','-t','rt:win',
+                     '-F','#{pane_id} #{pane_index} #{pane_pid}')
+        log['live_panes_pre'] = live_pre.stdout.strip().splitlines()
+        expected_panes = 3
+        actual_panes = len(log['live_panes_pre'])
+        log['expected_panes'] = expected_panes
+        log['actual_panes_pre'] = actual_panes
+
+        # Query session to see persistent_cell_id reads
+        sess_pre = snap.query_session('rt', socket=s1)
+        log['query_pre'] = []
+        for w in sess_pre.windows:
+            for p in w.panes:
+                log['query_pre'].append({
+                    'pane_id': p.pane_id,
+                    'pane_index': p.pane_index,
+                    'cell_id': p.cell_id,
+                    'persistent_cell_id': p.persistent_cell_id,
+                })
+
+        # Save
+        d0 = Path(tmp)/'save0'; d0.mkdir()
+        f0 = snap.save_session('rt', socket=s1, out_dir=d0)
+        yaml0 = f0.read_text()
+        ids0 = re.findall(r\"CELL_ID:\s*'(\d+)'\", yaml0)
+        log['yaml0_path'] = str(f0)
+        log['ids_pre'] = ids0
+
+        # Reload on fresh server (no neighbor, pane_ids from %0)
+        T(s1,'kill-server')
+        snap.load_session(f0, socket=s2, env=env)
+        time.sleep(0.8)
+
+        # Query reloaded session
+        sess_post = snap.query_session('rt', socket=s2)
+        log['query_post'] = []
+        for w in sess_post.windows:
+            for p in w.panes:
+                log['query_post'].append({
+                    'pane_id': p.pane_id,
+                    'pane_index': p.pane_index,
+                    'cell_id': p.cell_id,
+                    'persistent_cell_id': p.persistent_cell_id,
+                })
+
+        d1 = Path(tmp)/'save1'; d1.mkdir()
+        f1 = snap.save_session('rt', socket=s2, out_dir=d1)
+        yaml1 = f1.read_text()
+        ids1 = re.findall(r\"CELL_ID:\s*'(\d+)'\", yaml1)
+        log['yaml1_path'] = str(f1)
+        log['ids_post'] = ids1
+        T(s2,'kill-server')
+
+        # Save both YAMLs into the log for inspection
+        log['yaml0'] = yaml0
+        log['yaml1'] = yaml1
+
+        # ---- Assertions ----
+        print(f'panes expected: {expected_panes}')
+        print(f'panes actual:   {actual_panes}')
+        print(f'pre-reload:     {ids0}')
+        print(f'post-reload:    {ids1}')
+
+        # A1: correct pane count
+        if actual_panes != expected_panes:
+            errors.append(
+                f'FAIL pane count: expected {expected_panes}, got {actual_panes}')
+
+        # A2: CELL_IDs in YAML match pane count
+        if len(ids0) != expected_panes:
+            errors.append(
+                f'FAIL yaml0 has {len(ids0)} CELL_IDs, expected {expected_panes}')
+
+        # A3: all CELL_IDs must be unique
+        if len(ids0) != len(set(ids0)):
+            errors.append(
+                f'FAIL duplicate CELL_IDs in pre-reload: {ids0}')
+
+        # A4: CELL_IDs must survive reload
+        if ids0 != ids1:
+            errors.append(
+                f'FAIL CELL_IDs drifted: {ids0} -> {ids1}')
+
+        # A5: post-reload persistent_cell_id must not be empty
+        empty_persistent = [
+            p for p in log['query_post']
+            if not p['persistent_cell_id']]
+        if empty_persistent:
+            errors.append(
+                f'FAIL persistent_cell_id empty for {len(empty_persistent)}/{len(log[\"query_post\"])} panes after reload')
+
+        # A6: pre-reload cell_id must equal pane_id (no foreign inheritance)
+        # Fresh panes (not from tmuxp) have no CELL_ID env, so cell_id
+        # should fall through to pane_id.lstrip('%'). If persistent_cell_id
+        # returns a value that doesn't match pane_id, a foreign CELL_ID
+        # leaked from the parent process.
+        for p in log['query_pre']:
+            expected_from_pane = p['pane_id'].lstrip('%')
+            if p['persistent_cell_id'] and p['persistent_cell_id'] != expected_from_pane:
+                errors.append(
+                    f'FAIL inherited CELL_ID poison: pane {p[\"pane_id\"]} has '
+                    f'persistent_cell_id={p[\"persistent_cell_id\"]!r} but '
+                    f'pane_id implies {expected_from_pane!r}')
+                break  # one example is enough
+
+        log['errors'] = errors
+        log['passed'] = len(errors) == 0
+
+        Path(log_path).write_text(json.dumps(log, indent=2))
+        print(f'log: {log_path}')
+
+        if errors:
+            for e in errors:
+                print(e)
+            sys.exit(1)
+        else:
+            print('PASS -- all assertions passed')
+            sys.exit(0)
+        "
+
+  test:tmux-snapshot:manual-split-id:
+    desc: >-
+      RED test: after tmuxp loads a session, a manual split-window inherits
+      the parent pane's CELL_ID. The next save must still produce unique
+      CELL_IDs for all panes. This is the production bug: ps -E reads the
+      inherited env, not a per-pane value.
+    dir: '{{.ROOT_DIR}}/home/scripts/tmux/snapshot'
+    vars:
+      LOG: '{{.ROOT_DIR}}/.scratch/debug/test-tmux-snapshot-manual-split-id.log'
+    cmds:
+      - |
+        set -eu
+        mkdir -p "$(dirname "{{.LOG}}")"
+        python3 -c "
+        import tempfile, time, os, subprocess, re, sys, json, platform
+        from pathlib import Path
+        from datetime import datetime, timezone
+        import snapshot as snap
+
+        log_path = '{{.LOG}}'
+        log = {}
+        log['timestamp'] = datetime.now(timezone.utc).isoformat()
+        log['platform'] = platform.platform()
+        errors = []
+
+        tmp = tempfile.mkdtemp(prefix='snap-split-')
+        s1, s2 = f'{tmp}/s1.sock', f'{tmp}/s2.sock'
+        env = {k: v for k, v in os.environ.items() if k != 'CELL_ID'}
+        env['TERM'] = 'xterm-256color'
+        log['tmpdir'] = tmp
+
+        def T(sock, *a):
+            return subprocess.run(
+                ['tmux','-S',sock]+list(a),
+                capture_output=True, text=True, env=env)
+
+        # --- Phase 1: create session via tmuxp (simulated) ---
+        # Build a 2-pane session, save it, then load via tmuxp so panes
+        # have CELL_ID in their env.
+        T(s1,'new-session','-d','-s','rt','-x','200','-y','48','-n','win')
+        T(s1,'split-window','-v','-t','rt:win')
+        time.sleep(0.3)
+
+        d_seed = Path(tmp)/'seed'; d_seed.mkdir()
+        f_seed = snap.save_session('rt', socket=s1, out_dir=d_seed)
+        seed_yaml = f_seed.read_text()
+        seed_ids = re.findall(r\"CELL_ID:\s*'(\d+)'\", seed_yaml)
+        log['seed_ids'] = seed_ids
+
+        # Reload so panes inherit CELL_ID from env block
+        T(s1,'kill-server')
+        snap.load_session(f_seed, socket=s2, env=env)
+        time.sleep(0.8)
+
+        # Verify persistence works after reload
+        sess_loaded = snap.query_session('rt', socket=s2)
+        log['loaded_panes'] = []
+        for w in sess_loaded.windows:
+            for p in w.panes:
+                log['loaded_panes'].append({
+                    'pane_id': p.pane_id,
+                    'cell_id': p.cell_id,
+                    'persistent_cell_id': p.persistent_cell_id,
+                })
+
+        # --- Phase 2: user manually splits a pane ---
+        # The new pane's shell inherits CELL_ID from the parent pane.
+        # This is the production scenario.
+        panes_out = T(s2,'list-panes','-t','rt:win','-F','#{pane_id}')
+        first_pane = panes_out.stdout.strip().splitlines()[0]
+        T(s2,'split-window','-h','-t',first_pane)
+        time.sleep(0.3)
+
+        # --- Phase 3: save and check uniqueness ---
+        sess_after = snap.query_session('rt', socket=s2)
+        log['after_split_panes'] = []
+        for w in sess_after.windows:
+            for p in w.panes:
+                log['after_split_panes'].append({
+                    'pane_id': p.pane_id,
+                    'cell_id': p.cell_id,
+                    'persistent_cell_id': p.persistent_cell_id,
+                })
+
+        d_after = Path(tmp)/'after'; d_after.mkdir()
+        f_after = snap.save_session('rt', socket=s2, out_dir=d_after)
+        after_yaml = f_after.read_text()
+        after_ids = re.findall(r\"CELL_ID:\s*'(\d+)'\", after_yaml)
+        log['after_ids'] = after_ids
+        log['after_yaml'] = after_yaml
+        T(s2,'kill-server')
+
+        # ---- Assertions ----
+        print(f'after tmuxp load: {[p[\"cell_id\"] for p in log[\"loaded_panes\"]]}')
+        print(f'after manual split: {after_ids}')
+
+        # A1: must have 3 panes (2 original + 1 manual split)
+        if len(after_ids) != 3:
+            errors.append(f'FAIL expected 3 CELL_IDs, got {len(after_ids)}: {after_ids}')
+
+        # A2: all CELL_IDs must be unique
+        if len(after_ids) != len(set(after_ids)):
+            dupes = [x for x in after_ids if after_ids.count(x) > 1]
+            errors.append(f'FAIL duplicate CELL_IDs after manual split: {after_ids} (dupes: {set(dupes)})')
+
+        # A3: the manually-split pane must NOT have the same persistent_cell_id
+        # as its parent
+        for p in log['after_split_panes']:
+            parent_ids = [lp['persistent_cell_id'] for lp in log['loaded_panes']]
+            if p['persistent_cell_id'] and p['persistent_cell_id'] in parent_ids:
+                # Could be the parent itself (OK) or a child that inherited (BUG).
+                # Count how many panes share this persistent_cell_id.
+                same = [q for q in log['after_split_panes']
+                        if q['persistent_cell_id'] == p['persistent_cell_id']]
+                if len(same) > 1:
+                    errors.append(
+                        f'FAIL manual-split pane inherited parent CELL_ID: '
+                        f'{len(same)} panes share persistent_cell_id={p[\"persistent_cell_id\"]!r}')
+                    break
+
+        log['errors'] = errors
+        log['passed'] = len(errors) == 0
+
+        Path(log_path).write_text(json.dumps(log, indent=2))
+        print(f'log: {log_path}')
+
+        if errors:
+            for e in errors:
+                print(e)
+            sys.exit(1)
+        else:
+            print('PASS -- unique CELL_IDs after manual split')
+            sys.exit(0)
+        "

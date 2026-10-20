@@ -31,6 +31,7 @@ case "$SESSION" in
   MAD)   "$HS" send start-project --project_id 3979464 >/dev/null 2>&1 ;;
   MAP)   "$HS" send start-project --project_id 3497711 >/dev/null 2>&1 ;;
   MISKA) "$HS" send start-project --project_id 1751709 >/dev/null 2>&1 ;;
+  MUS)   "$HS" send start-project --project_id 4243078 >/dev/null 2>&1 ;;
   NMD)   "$HS" send start-project --project_id 3736729 >/dev/null 2>&1 ;;
   NPT)   "$HS" send start-project --project_id 3497712 >/dev/null 2>&1 ;;
   PTC)   "$HS" send start-project --project_id 3979459 >/dev/null 2>&1 ;;

@@ -27,6 +27,9 @@ in {
 
   # Karabiner Elements 15 is broken https://github.com/LnL7/nix-darwin/issues/1041
   nixpkgs.overlays = [
+    # awscli2 CA fix — remove compromised Comodo AAA / emSign roots (aws-cli#c044a7c)
+    (import ../../overlays/awscli2-ca-fix.nix)
+
     # mas overlay — nixpkgs 25.05 ships mas 2.2.2 which Apple broke when installd
     # was hardened in macOS 14.8.2+/15.7.2+/26.1+. Pull current mas (7.x) from
     # nixpkgs-unstable. Tracking: nix-darwin#1722, mas-cli#1221.

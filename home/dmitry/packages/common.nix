@@ -136,6 +136,7 @@ let
     # Build dependencies
     openssl
     zlib
+    libusb1
     cmake
     gnumake
     ijhttp

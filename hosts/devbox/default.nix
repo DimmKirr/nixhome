@@ -27,6 +27,10 @@ let
   ];
 in
 {
+  nixpkgs.overlays = [
+    (import ../../overlays/awscli2-ca-fix.nix)
+  ];
+
   home = {
     username = "dmitry";
     homeDirectory = "/home/dmitry";

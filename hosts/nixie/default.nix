@@ -7,6 +7,9 @@
 }: {
   nixpkgs.config.allowUnfree = true;
   nixpkgs.config.permittedInsecurePackages = [ "python-2.7.18.12" ];
+  nixpkgs.overlays = [
+    (import ../../overlays/awscli2-ca-fix.nix)
+  ];
 
   # Bootloader
   boot.loader.systemd-boot.enable = true;

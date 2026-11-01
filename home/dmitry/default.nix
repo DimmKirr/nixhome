@@ -130,7 +130,7 @@
         setDockerHost = true;
         settings = {
           cpu = 8;
-          memory = 24;
+          memory = 8;
           disk = 120;
           rootDisk = 20; # restart does not apply start's default for omitted settings
           runtime = "docker";

@@ -26,12 +26,24 @@ in
     settings = mkOption {
       type = lib.types.attrs;
       default = { };
+      default = {
+        # Ollama qwen3.6:27b-q8_0 on M4 Pro 48GB optimized config
+        # contextWindow limits KV cache to fit in available RAM (~15 GB headroom)
+        # maxTokens reserves ~50% of context for responses (tool calls, coding)
+        model = "ollama/qwen3.6:27b-q8_0";
+        contextWindow = 8192;
+        maxTokens = 4096;
+        sendSystemPrompt = true;
+        cacheSystemPrompt = true;
+        cacheConversation = true;
+      };
+
       example = literalExpression ''
         {
+          # Default: qwen3.6:27b-q8_0 on M4 Pro 48GB - see above
           theme = "opencode";
           model = "anthropic/claude-sonnet-4-20250514";
           autoshare = false;
-          autoupdate = true;
         }
       '';
       description = ''

@@ -18,6 +18,7 @@
 
   casks = [
     # "xquartz"  # disabled: brew fetch fails during darwin-rebuild (cask load error)
+    "audacity"
     "scribus"
     "1password"
     "1password-cli"

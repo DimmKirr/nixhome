@@ -181,9 +181,9 @@ let
     postman
     drawio
 
-    vagrant
+    # vagrant — moved to homebrew (darwin) / linux.nix; libguestfs dep broken in nixpkgs 26.05
     packer
-    audacity
+    # audacity — moved to homebrew cask (4.0.0 fails to build on macOS via nix)
 
     # tart — moved to darwin.nix (macOS-only)
     wireguard-tools

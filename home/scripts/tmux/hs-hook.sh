@@ -37,7 +37,7 @@ case "$SESSION" in
   PTC)   "$HS" send start-project --project_id 3979459 >/dev/null 2>&1 ;;
   UPE)   "$HS" send start-project --project_id 3956769 >/dev/null 2>&1 ;;
   *)
-    "$HS" send stop >/dev/null 2>&1
-    tmux display-message "HS: no project mapped for session [$SESSION] — tracking stopped"
+    "$HS" send start-project --project_id 4256427 >/dev/null 2>&1
+    tmux display-message "HS: no mapping for [$SESSION] — tracking on ALL project"
     ;;
 esac

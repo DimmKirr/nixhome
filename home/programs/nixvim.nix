@@ -43,8 +43,8 @@
 
     neo-tree = {
       enable = true;
-      closeIfLastWindow = true;
-      filesystem.followCurrentFile.enabled = true;
+      settings.close_if_last_window = true;
+      settings.filesystem.follow_current_file.enabled = true;
     };
 
     telescope = {
@@ -73,6 +73,7 @@
         basedpyright.enable = true;
         ts_ls.enable = true;
         yamlls.enable = true;
+        jsonls.enable = true;
       };
       keymaps = {
         silent = true;

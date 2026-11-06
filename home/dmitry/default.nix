@@ -130,7 +130,7 @@
         setDockerHost = true;
         settings = {
           cpu = 8;
-          memory = 8;
+          memory = 16;
           disk = 120;
           rootDisk = 20; # restart does not apply start's default for omitted settings
           runtime = "docker";
@@ -142,6 +142,43 @@
             { location = "/Volumes"; writable = true; }
             # /tmp itself is a reserved guest path in lima; /private/tmp is the
             # real directory behind macOS's /tmp symlink
+            { location = "/private/tmp"; writable = true; }
+            { location = "/var/folders"; writable = true; }
+          ];
+          provision = [
+            {
+              mode = "system";
+              script = ''
+                #!/bin/bash
+                set -eu
+                if [ ! -f /swapfile ]; then
+                  fallocate -l 8G /swapfile
+                  chmod 600 /swapfile
+                  mkswap /swapfile
+                fi
+                swapon /swapfile 2>/dev/null || true
+              '';
+            }
+          ];
+        };
+      };
+      # GPU-accelerated profile: Mesa Venus -> virtio-gpu -> virglrenderer -> MoltenVK -> Metal
+      # ~80% native Metal perf. Vulkan only (no native OpenGL). Apple Silicon + macOS 13+ required.
+      # Usage: colima start --profile krunkit
+      profiles.krunkit = {
+        isActive = false;
+        isService = false;
+        setDockerHost = false;
+        settings = {
+          cpu = 8;
+          memory = 16;
+          disk = 120;
+          rootDisk = 20;
+          runtime = "docker";
+          vmType = "krunkit";
+          mounts = [
+            { location = "/Users"; writable = true; }
+            { location = "/Volumes"; writable = true; }
             { location = "/private/tmp"; writable = true; }
             { location = "/var/folders"; writable = true; }
           ];

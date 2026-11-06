@@ -259,8 +259,21 @@ tasks:
     desc: Restart colima VM (picks up new CPU/memory/disk settings)
     silent: true
     cmds:
+      - task: colima:stop
+      - task: colima:start
+
+  colima:stop:
+    desc: Stop colima VM
+    silent: true
+    cmds:
       - colima stop
+
+  colima:start:
+    desc: Stop colima VM
+    silent: true
+    cmds:
       - colima start --save-config=false
+
 
   debug:colima:
     desc: Debug colima VM state, nested virtualization, and /dev/kvm availability

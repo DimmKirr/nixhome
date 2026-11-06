@@ -120,18 +120,18 @@
     target="$1"
     xpos="''${2:--x R}"
     ypos="''${3:--y P}"
-    sel="select-pane''${target:+ -t $target}"
+    tflag="''${target:+ -t $target}"
     tmux display-menu -T "#[align=centre]Pane Color" $xpos $ypos \
-      "#[fg=#BD93F9]Purple"  p "$sel; select-pane -P bg=#211B41" \
-      "#[fg=#8BE9FD]Blue"    b "$sel; select-pane -P bg=#1B2951" \
-      "#[fg=#8BE9FD]Cyan"    c "$sel; select-pane -P bg=#1B3941" \
-      "#[fg=#50FA7B]Green"   g "$sel; select-pane -P bg=#1B4121" \
-      "#[fg=#F1FA8C]Yellow"  y "$sel; select-pane -P bg=#41391B" \
-      "#[fg=#FFB86C]Orange"  o "$sel; select-pane -P bg=#412D1B" \
-      "#[fg=#FF5555]Red"     r "$sel; select-pane -P bg=#411B21" \
-      "#[fg=#FF79C6]Pink"    k "$sel; select-pane -P bg=#411B31" \
+      "#[fg=#BD93F9]Purple"  p "select-pane$tflag -P bg=#211B41" \
+      "#[fg=#8BE9FD]Blue"    b "select-pane$tflag -P bg=#1B2951" \
+      "#[fg=#8BE9FD]Cyan"    c "select-pane$tflag -P bg=#1B3941" \
+      "#[fg=#50FA7B]Green"   g "select-pane$tflag -P bg=#1B4121" \
+      "#[fg=#F1FA8C]Yellow"  y "select-pane$tflag -P bg=#41391B" \
+      "#[fg=#FFB86C]Orange"  o "select-pane$tflag -P bg=#412D1B" \
+      "#[fg=#FF5555]Red"     r "select-pane$tflag -P bg=#411B21" \
+      "#[fg=#FF79C6]Pink"    k "select-pane$tflag -P bg=#411B31" \
       "" "" "" \
-      "Reset"                x "$sel; select-pane -P default"
+      "Reset"                x "select-pane$tflag -P default"
   '';
 
   cellConnect = pkgs.writeShellScript "cell-connect" ''
@@ -228,7 +228,7 @@ in {
   keyMode = "vi";
 
   terminal = "tmux-256color";
-  historyLimit = 50000;
+  historyLimit = 10000;
   # TODO: Try https://github.com/sainnhe/tmux-fzf
   baseIndex = 1;
   extraConfig = ''
@@ -344,7 +344,7 @@ in {
         set -g pane-border-format '#{pane_index} #{?@label,#[fg=${theme.palette.overlay_2}]#{@label}#[default] | ,}#{?#{!=:#{pane_title},#{host_short}},#[fg=${theme.palette.overlay_2}]#{=40:pane_title}#[default],}'
 
         # Change Pane Menu with rename
-        bind-key -n MouseDown3Pane display-menu -T "Pane Menu" -x R -y P \
+        bind-key -n MouseDown3Pane display-menu -T "Pane Menu (ctrl-b, >)" -x R -y P \
             "Copy Line"       l "copy-mode" \
             "" "" "" \
             "Horizontal Split" h "split-window -v" \
@@ -370,7 +370,7 @@ in {
 
 
         # Override default "prefix + ." menu
-        bind-key > display-menu -T "#[align=centre]Pane Menu" -x W -y W \
+        bind-key > display-menu -T "#[align=centre]Pane Menu (ctrl-b, >)" -x W -y W \
           "Horizontal Split" h "split-window -h -c '#{pane_current_path}'" \
           "Vertical Split"   v "split-window -v -c '#{pane_current_path}'" \
           "" "" "" \
@@ -403,6 +403,9 @@ in {
           "" "" "" \
           "New Session"      s "new-session" \
           "New Window"       w "new-window" \
+          "" "" "" \
+          "Clear History"    x "run-shell 'for p in $(tmux list-panes -s -F \"#{pane_id}\"); do tmux clear-history -t \$p; done; tmux display-message \"Cleared scrollback for all panes in session\"'" \
+          "Reload Config"    R "source-file ~/.config/tmux/tmux.conf; display-message 'Config reloaded'" \
           "" "" "" \
           "Kill Session"     X "kill-session"
 
@@ -463,7 +466,10 @@ in {
         #######################
         # Auto-switch Hubstaff project when switching tmux sessions (macOS only)
         ${if pkgs.stdenv.isDarwin then ''
-        set-hook -g client-session-changed 'run-shell "/bin/sh ${../scripts/tmux/hs-hook.sh} #{session_name} #{client_name}"'
+        # Background the hook (&) so tmux's event loop is never blocked by
+        # Hubstaff CLI timeouts or network stalls. The -b flag on run-shell
+        # runs in background without capturing output (tmux 3.2+).
+        set-hook -g client-session-changed 'run-shell -b "/bin/sh ${../scripts/tmux/hs-hook.sh} #{session_name}"'
         '' else ""}
 
         ###############################
@@ -476,7 +482,8 @@ in {
         # Match status-bg so command-prompts/menus don't pop in tmux's
         # default yellow-on-black. (Ticket: tmux-message-style-defaults-to-yellow-black)
         set -g message-style       'bg=${theme.palette.surface_2},fg=${theme.palette.fg}'
-        set -g status-interval     5
+        set -g message-line        1
+        set -g status-interval     10
         set -g status-left-length  100
         # 500 (was 100, originally 300). Raised to fit the world-clock widget.
         # format[1] renders via #{E:status-right}, which ignores this limit;
@@ -498,34 +505,28 @@ in {
         # picks env up if present, falls through to the baked default otherwise.
 
         set -g status-left  '${framework.composeBar [ "session" ]}'
-        # If thin-client distortion returns: trim status-right to a smaller
-        # widget set (e.g. `[ "date-time" ]`) and inspect the test harness
-        # output under home/programs/tmux/tests/.
-        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" "world-clock-ny" "world-clock-la" ]}'
-        # Periodic auto-save tick — MUST come after the `set -g status-right`
-        # above, otherwise that overwrite clobbers this appended #() command.
-        # Previously lived inside a plugin's extraConfig where it ran BEFORE
-        # the main block. (Ticket: tmux-snapshot-tick-silently-disabled)
-        set -ag status-right '#(${snapshotTick})'
 
         set -g window-status-format         '${framework.windowStyle.format}'
         set -g window-status-current-format '${framework.windowStyle.currentFormat}'
         set -g window-status-separator      '${framework.windowStyle.separator}'
 
-        # Row layout:
-        #   format[0] (top)    : status-left + windows  (status-right OMITTED)
-        #   format[1] (bottom) : status-right centered
-        # status-left wrapped in `range=left` so right-click on NMD fires
-        # MouseDown3StatusLeft → Session Menu. status-right wrapped in
-        # `range=right` so clicks on row 1 fire MouseDown3StatusRight.
-        # format[1] uses `#{E:status-right}` (plain evaluation) instead of
-        # `#{T;=/#{status-right-length}:status-right}` (tmux-3.0-only
-        # truncation directive that mangles on thin clients / older tmux).
-        # (Ticket: tmux-thin-ssh-client-status-bar-distortion)
         ${if pkgs.stdenv.isDarwin then ''
+        # Two-row Darwin layout. Widgets are inlined directly into format[1]
+        # instead of going through status-right + #{E:status-right}. The old
+        # approach caused double-evaluation: tmux evaluates #() commands in
+        # status-right for the default renderer, then #{E:status-right} in
+        # format[1] re-evaluates them — doubling the fork count (12+ processes
+        # per refresh instead of 6). Clearing status-right and inlining the
+        # widget content into format[1] ensures each #() runs exactly once.
+        # (Ticket: tmux-session-switch-cpu-spike)
+        set -g status-right ""
         set -g status-format[0] '#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?window_end_flag,,#{window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?window_end_flag,,#{window-status-separator}}}'
-        set -g status-format[1] '#[align=centre]#[range=right]#{E:status-right}#[norange]'
-        '' else ""}
+        set -g status-format[1] '#[align=centre]#[range=right]${framework.composeBar [ "now-playing" "weather" "date-time" "world-clock-ny" "world-clock-la" ]}#(${snapshotTick})#[norange]'
+        '' else ''
+        # Single-row Linux layout — widgets live in status-right directly.
+        set -g status-right '${framework.composeBar [ "now-playing" "weather" "date-time" "world-clock-ny" "world-clock-la" ]}'
+        set -ag status-right '#(${snapshotTick})'
+        ''}
 
     # Initialize TMUX plugin manager (keep this line at the very bottom of tmux.conf)
     #    run '~/.tmux/plugins/tpm/tpm'

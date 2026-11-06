@@ -11,7 +11,7 @@ PARAMETER min_p 0
 PARAMETER presence_penalty 1.5
 PARAMETER repeat_penalty 1
 PARAMETER temperature 1
-PARAMETER num_ctx 16384
+PARAMETER num_ctx 8192
 LICENSE """
                                  Apache License
                            Version 2.0, January 2004

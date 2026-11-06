@@ -67,7 +67,11 @@ in {
 
   # Import reusable modules
   imports = [
-    ../../modules/darwin/power.nix
+    # power.nix (always-awake) removed: it prevented macOS sleep entirely
+    # (disablesleep=1 + caffeinate -dims), which kept Colima's VM running at
+    # full CPU even with the lid closed. Sleep/wake is now handled by
+    # sleepwatcher, which stops Colima on sleep and restarts it on wake.
+    # ../../modules/darwin/power.nix
     ../../modules/darwin/replayd.nix
     ../../modules/darwin/services.nix
     ../../modules/darwin/setapp.nix
@@ -385,10 +389,16 @@ in {
     # Set manually: System Settings → Apple Intelligence & Siri → Keyboard
     # Shortcut → Globe+S (or Off). Use plistwatch to discover the real key.
 
+    # --- Reinforce Dock autohide=false (macOS 26 Tahoe bug can flip it) ---
+    sudo -u dmitry defaults write com.apple.dock autohide -bool false
+
     # --- Flush: restart cfprefsd so it re-reads plists, then activate ---
     sudo -u dmitry killall cfprefsd 2>/dev/null || true
     sleep 1
     sudo -u dmitry /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
+
+    # --- Restart Dock so it picks up the updated plist ---
+    sudo -u dmitry killall Dock 2>/dev/null || true
   '';
 
   system.primaryUser = "dmitry";

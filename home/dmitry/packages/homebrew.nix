@@ -14,6 +14,7 @@
     "hazelops/ize"
     "jeffreywildman/homebrew-virt-manager"
     "opencode-ai/tap"
+    "slp/krunkit"
   ];
 
   casks = [
@@ -73,6 +74,7 @@
   brews = [
     # "ize-dev" # disabled: brew trust doesn't persist for hazelops/ize tap
     # "atun" # disabled: brew trust doesn't persist for automationd/tap
+    "krunkit" # GPU-accelerated VM backend for colima (Apple Silicon, macOS 13+)
     "zlib"
     "openssl@3"
     "readline"
@@ -88,6 +90,7 @@
     "libimobiledevice"
     "winetricks"
     "makensis"
+    "sleepwatcher" # power-event daemon: runs ~/.sleep on sleep, ~/.wakeup on wake
   ];
 
   # masApps disabled — mas Spotlight indexing issue (mas-cli/mas#1222, #927)

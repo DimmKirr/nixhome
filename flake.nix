@@ -68,7 +68,10 @@
       ...
     }:
     {
-      #      formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt-rfc-style;
+      formatter = builtins.listToAttrs (map (system: {
+        name = system;
+        value = nixpkgs.legacyPackages.${system}.nixfmt-rfc-style;
+      }) [ "aarch64-darwin" "x86_64-linux" "aarch64-linux" ]);
 
       # NixOS configurations for Linux hosts
       nixosConfigurations = {

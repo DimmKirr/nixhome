@@ -153,7 +153,11 @@ let
     # Mobile UI testing
     maestro
     imagemagick
-    wimlib
+    # syslinux is x86-only; wimlib's build references it on Linux.
+    # Override to null on non-x86 so the package still builds.
+    (if pkgs.stdenv.hostPlatform.isx86
+      then wimlib
+      else (wimlib.override { syslinux = null; }))
     osslsigncode
   ];
 

@@ -544,6 +544,59 @@ def _rewrite_for_mirrored(preset: str, layout: str, panes: tuple[Pane, ...]
     return new_layout, (main,) + others
 
 
+# ------------------------------------------------------------------ DFS leaf order
+
+
+def _dfs_leaf_ids(layout: str) -> list[int]:
+    """Extract pane IDs in DFS traversal order from a layout string.
+
+    tmuxp creates panes in YAML order and substitutes them into the layout
+    string's DFS leaf positions. To emit a YAML whose panes match the DFS
+    order, we need to know which pane ID sits at each leaf position.
+
+    Leaves are `WxH,X,Y,N` — the trailing integer N is the tmux pane number
+    (the numeric part of %N). Subtrees are `WxH,X,Y[...]` or `WxH,X,Y{...}`.
+    We walk the string left-to-right and collect N from each leaf.
+    """
+    body = re.sub(r"^[0-9a-f]{4},", "", layout)
+    ids: list[int] = []
+    for m in re.finditer(r"\d+x\d+,\d+,\d+,(\d+)", body):
+        end = m.end()
+        # If followed by [ or {, this is a subtree prefix, not a leaf.
+        if end < len(body) and body[end] in "[{":
+            continue
+        ids.append(int(m.group(1)))
+    return ids
+
+
+def _reorder_by_dfs(layout: str, panes: tuple[Pane, ...]) -> tuple[Pane, ...]:
+    """Reorder panes to match the DFS leaf order in the layout string.
+
+    tmuxp substitutes YAML[i] into DFS-leaf[i]. If we emit panes in
+    pane_index order but the layout's DFS order differs (e.g. a mirrored
+    layout that was user-resized and lost its canonical preset status),
+    pane content ends up in the wrong visual slots.
+
+    For non-preset layouts, we reorder panes to match DFS so the byte-exact
+    load puts each pane back where it was.
+
+    Falls back to the original order if the DFS extraction fails or doesn't
+    match the pane set (defensive).
+    """
+    dfs_ids = _dfs_leaf_ids(layout)
+    if len(dfs_ids) != len(panes):
+        return panes  # defensive: mismatch, keep original order
+    # Build a map from tmux pane number -> Pane object.
+    pane_num_to_pane = {}
+    for p in panes:
+        num = int(p.pane_id.lstrip("%"))
+        pane_num_to_pane[num] = p
+    # Check all DFS IDs are in our pane set.
+    if not all(pid in pane_num_to_pane for pid in dfs_ids):
+        return panes  # defensive
+    return tuple(pane_num_to_pane[pid] for pid in dfs_ids)
+
+
 # ------------------------------------------------------------------ YAML emit
 
 # Hand-rolled emitter — keeps layout strings byte-for-byte and avoids a
@@ -618,17 +671,30 @@ def emit_yaml(session: Session,
             lines.append(f"{prefix}{key}: {val}")
             first_line_emitted = True
 
-        # For canonical `*-mirrored` presets, rewrite both the layout (root
-        # children reversed) and the pane list (main pane hoisted to YAML[0])
-        # so pane_index 0 lines up with the main slot through both the
-        # tmuxp DFS substitution AND any later `select-layout` re-apply.
-        # Non-mirrored layouts already satisfy this naturally.
+        # Pane ordering strategy:
+        #
+        # tmuxp substitutes YAML[i] -> DFS-leaf[i] in the layout string.
+        # We must emit panes in an order that makes this substitution land
+        # each pane back in its original visual slot.
+        #
+        # - Canonical *-mirrored presets: rewrite both the layout (root
+        #   children reversed) and the pane list (main pane hoisted to
+        #   YAML[0]) so pane_index 0 lines up with the main slot through
+        #   both the tmuxp DFS substitution AND any later `select-layout`
+        #   re-apply. Non-mirrored presets already satisfy this naturally.
+        #
+        # - Non-preset layouts (user-resized, asymmetric): no re-apply
+        #   will run, so we emit panes in the layout string's DFS leaf
+        #   order. This makes tmuxp's substitution byte-exact: YAML[i]
+        #   goes to the same visual slot it occupied before save.
         layout_out = w.layout
         panes_out = w.panes
         preset = presets.get(w.name)
         if preset and preset.endswith("-mirrored"):
             layout_out, panes_out = _rewrite_for_mirrored(
                 preset, w.layout, w.panes)
+        elif not preset and len(w.panes) > 1:
+            panes_out = _reorder_by_dfs(w.layout, w.panes)
 
         if w.focus:
             add("focus", "'true'")

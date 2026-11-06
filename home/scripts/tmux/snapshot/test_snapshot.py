@@ -191,14 +191,6 @@ class RoundTripTests(unittest.TestCase):
         tmux(sock, "split-window", "-h", "-t", "rt:omv")
         tmux(sock, "select-layout", "-t", "rt:omv", "main-horizontal")
 
-        # Tag each pane via send-keys so we can identify positions post-load.
-        # We use start_command via respawn-pane so the command persists across
-        # the freeze/load (pane_current_command basename is captured).
-        for pid, ident in [("%0", "TOPBAR"), ("%1", "BOTLEFT"), ("%2", "BOTRIGHT")]:
-            # Use a uniquely-named sleep-ish binary so basename round-trips
-            # something identifying. Easiest: use distinct shell scripts.
-            pass
-
         # Capture geometry & visual order before save
         positions_before = sorted(set(
             (int(t), int(l)) for t, l, *_ in
@@ -2506,6 +2498,202 @@ class PaneStyleRoundTripTests(unittest.TestCase):
         # The YAML should NOT contain any CELL_STYLE (all panes are default)
         self.assertNotIn("CELL_STYLE", yaml_text,
                          f"reset pane leaked CELL_STYLE into YAML:\n{yaml_text}")
+
+
+class AsymmetricLayoutRoundTripTests(unittest.TestCase):
+    """Gap coverage: user-resized (asymmetric) layouts must survive a
+    round-trip without any preset re-apply.
+
+    These layouts take a completely different code path from canonical
+    presets: detect_preset_layout returns None, no `select-layout` re-apply
+    runs, and geometry must survive byte-exact from the layout string alone.
+
+    Also covers the gaps in existing tests:
+    - Full (top, left, width, height) geometry assertion without re-apply
+    - Pane identity (CELL_ID) at each visual slot without re-apply
+    - Cleanup of the dead `pass` loop in test_main_horizontal_panes
+    """
+
+    def setUp(self):
+        self._td = TemporaryDirectory()
+        self.work = Path(self._td.name)
+        self.fx = TmuxFixture(self.work)
+
+    def tearDown(self):
+        self.fx.kill_all()
+        self._td.cleanup()
+
+    def _list_panes_visual(self, sock: str) -> list:
+        """List panes sorted by (top, left). Returns (top, left, w, h, pane_id)."""
+        raw = tmux(sock, "list-panes", "-t", "rt:win",
+                   "-F", "#{pane_top} #{pane_left} #{pane_width} #{pane_height} #{pane_id}",
+                   env=self.fx.env).splitlines()
+        return sorted(
+            (int(t), int(l), int(w), int(h), pid)
+            for t, l, w, h, pid in (line.split() for line in raw if line.strip())
+        )
+
+    def _read_cell_id(self, sock: str, pane_id: str) -> str:
+        return read_cell_id(sock, pane_id, env=self.fx.env)
+
+    def _build_asymmetric_layout(self, sock: str) -> None:
+        """Build a 3-pane layout, then drag dividers to make it asymmetric.
+
+        Start with main-horizontal-mirrored (canonical), then resize the
+        top-left pane wider and the bottom pane taller. The resulting layout
+        has unequal secondary widths, so detect_preset_layout returns None.
+        """
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "set-window-option", "-t", "rt:win",
+             "main-pane-height", "2", env=env)
+        tmux(sock, "select-layout", "-t", "rt:win",
+             "main-horizontal-mirrored", env=env)
+        time.sleep(0.1)
+
+        # Now drag dividers to break the canonical equal-secondary pattern.
+        # Resize top-left pane wider by 30 columns (makes secondaries unequal).
+        panes = self._list_panes_visual(sock)
+        top_left_pid = panes[0][-1]  # smallest (top, left)
+        tmux(sock, "resize-pane", "-t", top_left_pid, "-R", "30", env=env)
+        # Resize bottom pane taller by 5 rows.
+        bottom_pid = panes[-1][-1]  # largest pane_top
+        tmux(sock, "resize-pane", "-t", bottom_pid, "-U", "5", env=env)
+        time.sleep(0.1)
+
+    def test_asymmetric_layout_not_detected_as_preset(self):
+        """Sanity: the layout we build is NOT a canonical preset."""
+        sock = self.fx.sock
+        self._build_asymmetric_layout(sock)
+        layout = tmux(sock, "list-windows", "-t", "rt",
+                      "-F", "#{window_layout}", env=self.fx.env).strip()
+        self.assertIsNone(snap.detect_preset_layout(layout),
+                          f"asymmetric layout wrongly detected as preset: {layout}")
+
+    def test_asymmetric_layout_full_geometry_round_trip(self):
+        """Core gap test: user-resized layout must preserve full (top, left,
+        width, height) per pane after save → kill → load, with NO preset
+        re-apply. This is the byte-exact code path."""
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_asymmetric_layout(sock)
+
+        before_panes = self._list_panes_visual(sock)
+        before_geom = [(t, l, w, h) for t, l, w, h, _ in before_panes]
+        before_layout = tmux(sock, "list-windows", "-t", "rt",
+                             "-F", "#{window_layout}", env=env).strip()
+        # Confirm not a preset (no re-apply will run)
+        self.assertIsNone(snap.detect_preset_layout(before_layout))
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        yaml_text = target.read_text()
+        # No preset_layouts entry for this window
+        self.assertNotIn("preset_layouts:", yaml_text,
+                         f"asymmetric layout should not emit preset_layouts:\n{yaml_text}")
+
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+
+        after_panes = self._list_panes_visual(self.fx.load_sock)
+        after_geom = [(t, l, w, h) for t, l, w, h, _ in after_panes]
+        after_layout = tmux(self.fx.load_sock, "list-windows", "-t", "rt",
+                            "-F", "#{window_layout}", env=env).strip()
+
+        self.assertEqual(len(before_geom), len(after_geom),
+                         f"pane count changed: {len(before_geom)} → {len(after_geom)}")
+        self.assertEqual(before_geom, after_geom,
+                         f"asymmetric pane geometry not preserved:\n"
+                         f"  before: {before_geom}\n"
+                         f"  after:  {after_geom}")
+        self.assertEqual(normalize_layout(before_layout),
+                         normalize_layout(after_layout),
+                         f"layout topology changed:\n"
+                         f"  before: {before_layout}\n"
+                         f"  after:  {after_layout}")
+
+    def test_asymmetric_layout_pane_identity_round_trip(self):
+        """Pane identity (CELL_ID) at each visual slot must survive a
+        round-trip of an asymmetric layout without any preset re-apply.
+        Geometry match alone doesn't prove panes aren't swapped."""
+        sock = self.fx.sock
+        env = self.fx.env
+        self._build_asymmetric_layout(sock)
+
+        before_panes = self._list_panes_visual(sock)
+        before_cell_ids = [pid.lstrip("%") for _, _, _, _, pid in before_panes]
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+        snap.load_session(target, socket=self.fx.load_sock, env=env)
+        time.sleep(0.6)
+
+        after_panes = self._list_panes_visual(self.fx.load_sock)
+        after_cell_ids = [
+            self._read_cell_id(self.fx.load_sock, pid)
+            for _, _, _, _, pid in after_panes
+        ]
+
+        self.assertEqual(before_cell_ids, after_cell_ids,
+                         f"pane identities scrambled in asymmetric round-trip:\n"
+                         f"  before (visual order): {before_cell_ids}\n"
+                         f"  after  (visual order): {after_cell_ids}")
+
+    def test_main_horizontal_full_geometry_no_reapply(self):
+        """Non-mirrored canonical layout: verify full (top, left, width,
+        height) after byte-exact load (no preset re-apply).
+
+        Existing test_three_pane_even_horizontal_round_trip checks
+        list_pane_geometry (which is full geometry), but that's an even
+        layout. This test uses main-horizontal (non-mirrored) and confirms
+        the byte-exact load alone preserves full dimensions."""
+        sock = self.fx.sock
+        env = self.fx.env
+        tmux(sock, "new-session", "-d", "-s", "rt",
+             "-x", "200", "-y", "48", "-n", "win", env=env)
+        tmux(sock, "split-window", "-v", "-t", "rt:win", env=env)
+        top_pane = tmux(sock, "list-panes", "-t", "rt:win",
+                        "-F", "#{pane_top} #{pane_id}", env=env).splitlines()
+        top_id = sorted((int(l.split()[0]), l.split()[1])
+                        for l in top_pane if l)[0][1]
+        tmux(sock, "split-window", "-h", "-t", top_id, env=env)
+        tmux(sock, "select-layout", "-t", "rt:win", "main-horizontal", env=env)
+
+        before_panes = self._list_panes_visual(sock)
+        before_geom = [(t, l, w, h) for t, l, w, h, _ in before_panes]
+        before_cell_ids = [pid.lstrip("%") for _, _, _, _, pid in before_panes]
+
+        target = snap.save_session("rt", socket=sock, out_dir=self.fx.yaml_dir)
+        tmux(sock, "kill-server", env=env, check=False)
+
+        # Load via tmuxp only (snap.load_session calls tmuxp + re-applies
+        # presets, but for main-horizontal the re-apply is idempotent.
+        # We use tmuxp_load directly to test the byte-exact path.)
+        tmuxp_load(self.fx.load_sock, target, env=env)
+        time.sleep(0.4)
+
+        after_panes = self._list_panes_visual(self.fx.load_sock)
+        after_geom = [(t, l, w, h) for t, l, w, h, _ in after_panes]
+        after_cell_ids = [
+            self._read_cell_id(self.fx.load_sock, pid)
+            for _, _, _, _, pid in after_panes
+        ]
+
+        self.assertEqual(before_geom, after_geom,
+                         f"main-horizontal full geometry not preserved (byte-exact):\n"
+                         f"  before: {before_geom}\n"
+                         f"  after:  {after_geom}")
+        self.assertEqual(before_cell_ids, after_cell_ids,
+                         f"pane identities scrambled:\n"
+                         f"  before: {before_cell_ids}\n"
+                         f"  after:  {after_cell_ids}")
 
 
 class MarkLiveTests(unittest.TestCase):

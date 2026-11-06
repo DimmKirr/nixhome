@@ -129,7 +129,7 @@
         isService = true;
         setDockerHost = true;
         settings = {
-          cpu = 8;
+          cpu = 10;
           memory = 16;
           disk = 120;
           rootDisk = 20; # restart does not apply start's default for omitted settings

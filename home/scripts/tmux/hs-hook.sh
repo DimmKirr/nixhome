@@ -36,12 +36,12 @@ printf '%s' "$$" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 # --- Check Hubstaff with a 1s timeout ---
-if ! timeout 1 "$HS" send status >/dev/null 2>&1; then
+if ! timeout 5 "$HS" send status >/dev/null 2>&1; then
   # Not running. Try to start it, but don't block tmux for it.
   open -a Hubstaff 2>/dev/null
   # Give it one quick check after 1s, then give up
   sleep 1
-  if ! timeout 1 "$HS" send status >/dev/null 2>&1; then
+  if ! timeout 5 "$HS" send status >/dev/null 2>&1; then
     tmux display-message "HS: Hubstaff not ready -- will catch next switch"
     exit 0
   fi
@@ -49,29 +49,29 @@ fi
 
 # --- Switch project with a 1s timeout ---
 case "$SESSION" in
-  CELL)  timeout 1 "$HS" send start-project --project_id 4165404 >/dev/null 2>&1 ;;
-  DIMM)  timeout 1 "$HS" send start-project --project_id 3956770 >/dev/null 2>&1 ;;
-  EVER)  timeout 1 "$HS" send start-project --project_id 3956768 >/dev/null 2>&1 ;;
-  FAM)   timeout 1 "$HS" send start-project --project_id 3979460 >/dev/null 2>&1 ;;
-  FINA)  timeout 1 "$HS" send start-project --project_id 3979461 >/dev/null 2>&1 ;;
-  HERI)  timeout 1 "$HS" send start-project --project_id 3979462 >/dev/null 2>&1 ;;
-  HOME)  timeout 1 "$HS" send start-project --project_id 3727679 >/dev/null 2>&1 ;;
-  HZL)   timeout 1 "$HS" send start-project --project_id 3497760 >/dev/null 2>&1 ;;
-  I)     timeout 1 "$HS" send start-project --project_id 4097848 >/dev/null 2>&1 ;;
-  IMI)   timeout 1 "$HS" send start-project --project_id 4205957 >/dev/null 2>&1 ;;
-  IOT)   timeout 1 "$HS" send start-project --project_id 3984316 >/dev/null 2>&1 ;;
-  KIRR)  timeout 1 "$HS" send start-project --project_id 3956771 >/dev/null 2>&1 ;;
-  KIWA)  timeout 1 "$HS" send start-project --project_id 3979463 >/dev/null 2>&1 ;;
-  MAD)   timeout 1 "$HS" send start-project --project_id 3979464 >/dev/null 2>&1 ;;
-  MAP)   timeout 1 "$HS" send start-project --project_id 3497711 >/dev/null 2>&1 ;;
-  MISKA) timeout 1 "$HS" send start-project --project_id 1751709 >/dev/null 2>&1 ;;
-  MUS)   timeout 1 "$HS" send start-project --project_id 4243078 >/dev/null 2>&1 ;;
-  NMD)   timeout 1 "$HS" send start-project --project_id 3736729 >/dev/null 2>&1 ;;
-  NPT)   timeout 1 "$HS" send start-project --project_id 3497712 >/dev/null 2>&1 ;;
-  PTC)   timeout 1 "$HS" send start-project --project_id 3979459 >/dev/null 2>&1 ;;
-  UPE)   timeout 1 "$HS" send start-project --project_id 3956769 >/dev/null 2>&1 ;;
+  CELL)  timeout 5 "$HS" send start-project --project_id 4165404 >/dev/null 2>&1 ;;
+  DIMM)  timeout 5 "$HS" send start-project --project_id 3956770 >/dev/null 2>&1 ;;
+  EVER)  timeout 5 "$HS" send start-project --project_id 3956768 >/dev/null 2>&1 ;;
+  FAM)   timeout 5 "$HS" send start-project --project_id 3979460 >/dev/null 2>&1 ;;
+  FINA)  timeout 5 "$HS" send start-project --project_id 3979461 >/dev/null 2>&1 ;;
+  HERI)  timeout 5 "$HS" send start-project --project_id 3979462 >/dev/null 2>&1 ;;
+  HOME)  timeout 5 "$HS" send start-project --project_id 3727679 >/dev/null 2>&1 ;;
+  HZL)   timeout 5 "$HS" send start-project --project_id 3497760 >/dev/null 2>&1 ;;
+  I)     timeout 5 "$HS" send start-project --project_id 4097848 >/dev/null 2>&1 ;;
+  IMI)   timeout 5 "$HS" send start-project --project_id 4205957 >/dev/null 2>&1 ;;
+  IOT)   timeout 5 "$HS" send start-project --project_id 3984316 >/dev/null 2>&1 ;;
+  KIRR)  timeout 5 "$HS" send start-project --project_id 3956771 >/dev/null 2>&1 ;;
+  KIWA)  timeout 5 "$HS" send start-project --project_id 3979463 >/dev/null 2>&1 ;;
+  MAD)   timeout 5 "$HS" send start-project --project_id 3979464 >/dev/null 2>&1 ;;
+  MAP)   timeout 5 "$HS" send start-project --project_id 3497711 >/dev/null 2>&1 ;;
+  MISKA) timeout 5 "$HS" send start-project --project_id 1751709 >/dev/null 2>&1 ;;
+  MUS)   timeout 5 "$HS" send start-project --project_id 4243078 >/dev/null 2>&1 ;;
+  NMD)   timeout 5 "$HS" send start-project --project_id 3736729 >/dev/null 2>&1 ;;
+  NPT)   timeout 5 "$HS" send start-project --project_id 3497712 >/dev/null 2>&1 ;;
+  PTC)   timeout 5 "$HS" send start-project --project_id 3979459 >/dev/null 2>&1 ;;
+  UPE)   timeout 5 "$HS" send start-project --project_id 3956769 >/dev/null 2>&1 ;;
   *)
-    timeout 1 "$HS" send start-project --project_id 4256427 >/dev/null 2>&1
+    timeout 5 "$HS" send start-project --project_id 4256427 >/dev/null 2>&1
     tmux display-message "HS: no mapping for [$SESSION] — tracking on ALL project"
     ;;
 esac

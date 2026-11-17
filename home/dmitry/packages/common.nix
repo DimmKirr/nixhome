@@ -149,6 +149,8 @@ let
     tmuxp
     aws-vault
     graphviz
+    fribidi
+    libraqm
 
     # Mobile UI testing
     maestro

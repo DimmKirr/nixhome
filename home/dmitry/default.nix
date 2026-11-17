@@ -17,6 +17,7 @@
       PIPX_HOME = "$HOME/.local/pipx";
       PIPX_BIN_DIR = "$HOME/.local/bin";
       DEVCELL_NIXHOME_PATH = "$HOME/dev/devcell-sh/home";
+      DEVCELL_NIX_OVERRIDE_INPUTS = "devcell/devcell=path:$HOME/dev/devcell-sh/devcell";
       PYTHONPATH = builtins.concatStringsSep ":" [
         "$HOME/dev/dimmkirr/yt-dl-plugins"
         "$PYTHONPATH"

@@ -14,7 +14,7 @@
     "hazelops/ize"
     "jeffreywildman/homebrew-virt-manager"
     "opencode-ai/tap"
-    "slp/krunkit"
+    # "slp/krunkit" # moved to nix overlay
   ];
 
   casks = [
@@ -69,12 +69,13 @@
     "hubstaff"
     "wine-stable"
     "gimp"
+    "blender"
   ];
 
   brews = [
     # "ize-dev" # disabled: brew trust doesn't persist for hazelops/ize tap
     # "atun" # disabled: brew trust doesn't persist for automationd/tap
-    "krunkit" # GPU-accelerated VM backend for colima (Apple Silicon, macOS 13+)
+    # krunkit — moved to nix (darwin.nix) for overlaid libkrun-efi with memory reclaim
     "zlib"
     "openssl@3"
     "readline"

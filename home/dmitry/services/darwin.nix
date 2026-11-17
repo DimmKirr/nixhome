@@ -2,6 +2,9 @@
 { config, lib, pkgs, pkgsUnstable, ... }: lib.mkIf pkgs.stdenv.isDarwin {
 
   # --- Colima: container runtime (Docker via lightweight VM) ---
+  # Using krunkit (libkrun) backend for dynamic RAM reclaim + GPU passthrough.
+  # Tradeoffs vs vz: no Rosetta (x86_64 falls back to slow qemu-user), 9P mounts
+  # instead of virtiofs (slower I/O), no K3s support.
   services.colima = {
     enable = true;
     package = pkgsUnstable.colima;
@@ -12,12 +15,9 @@
       settings = {
         cpu = 10;
         memory = 16;
-        disk = 120;
-        rootDisk = 20; # restart does not apply start's default for omitted settings
+        rootDisk = 120; # krunkit bug: secondary `disk` unmounts on restart (#1614)
         runtime = "docker";
-        vmType = "vz";
-        rosetta = true;
-        nestedVirtualization = true;
+        vmType = "krunkit";
         mounts = [
           { location = "/Users"; writable = true; }
           { location = "/Volumes"; writable = true; }
@@ -38,43 +38,10 @@
                 mkswap /swapfile
               fi
               swapon /swapfile 2>/dev/null || true
-            '';
-          }
-        ];
-      };
-    };
-    # GPU-accelerated profile: Mesa Venus -> virtio-gpu -> virglrenderer -> MoltenVK -> Metal
-    # ~80% native Metal perf. Vulkan only (no native OpenGL). Apple Silicon + macOS 13+ required.
-    # Usage: colima start --profile krunkit
-    profiles.krunkit = {
-      isActive = false;
-      isService = false;
-      setDockerHost = false;
-      settings = {
-        cpu = 8;
-        memory = 16;
-        disk = 120;
-        rootDisk = 20;
-        runtime = "docker";
-        vmType = "krunkit";
-        mounts = [
-          { location = "/Users"; writable = true; }
-          { location = "/Volumes"; writable = true; }
-          { location = "/private/tmp"; writable = true; }
-          { location = "/var/folders"; writable = true; }
-        ];
-        provision = [
-          {
-            mode = "system";
-            script = ''
-              #!/bin/bash
-              set -eu
-              if [ ! -f /swapfile ]; then
-                fallocate -l 8G /swapfile
-                chmod 600 /swapfile
-                mkswap /swapfile
-              fi
-              swapon /swapfile 2>/dev/null || true
+
+              # Bias toward reclaiming file cache over anonymous pages so freed
+              # pages become reportable to libkrun's memory reclaim sooner.
+              sysctl -w vm.swappiness=10
             '';
           }
         ];
@@ -83,10 +50,8 @@
   };
 
   # The home-manager colima module gives the launchd agent a nix-only PATH.
-  # Colima gates nestedVirtualization (and rosetta) on host checks that shell
-  # out to /usr/sbin/system_profiler and /usr/bin/pgrep; when those are not
-  # found the check fails silently and the setting never reaches lima.yaml.
-  # Keep the module's PATH and append the macOS system dirs.
+  # Add krunkit (VM backend) and macOS system dirs that colima shells out to
+  # (/usr/sbin/system_profiler, /usr/bin/pgrep, etc.).
   launchd.agents = let
     c = config.services.colima;
     modulePath = lib.makeBinPath [
@@ -98,6 +63,7 @@
       c.curlPackage
       c.bashPackage
       c.kubectlPackage
+      pkgsUnstable.krunkit
       pkgs.darwin.DarwinTools
     ];
   in {

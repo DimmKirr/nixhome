@@ -255,6 +255,17 @@ tasks:
     cmds:
       - colima ssh
 
+  colima:rebuild:
+    desc: Destroy and recreate colima VM (required for vmType changes)
+    silent: true
+    cmds:
+      - task: colima:stop
+      - colima delete --force
+      # colima delete nukes ~/.colima/default/ including the config that
+      # home-manager wrote during activation. Re-run switch to regenerate it.
+      - task: apply
+      - task: colima:start
+
   colima:restart:
     desc: Restart colima VM (picks up new CPU/memory/disk settings)
     silent: true
@@ -1573,3 +1584,164 @@ tasks:
             print('PASS -- unique CELL_IDs after manual split')
             sys.exit(0)
         "
+
+  debug:colima:gpu:
+    desc: Trace krunkit GPU passthrough chain (host + guest) and log results
+    silent: true
+    vars:
+      LOG: '{{.ROOT_DIR}}/.scratch/debug/logs/colima-gpu.log'
+    cmds:
+      - |
+        set -eu
+        mkdir -p "$(dirname "{{.LOG}}")"
+        {
+
+        echo "=== krunkit binary ==="
+        which krunkit 2>/dev/null || echo "(not found)"
+        krunkit --version 2>&1 || true
+
+        echo ""
+        echo "=== dylib linkage: krunkit -> libkrun -> virglrenderer ==="
+        KBIN=$(which krunkit 2>/dev/null || true)
+        if [ -n "$KBIN" ]; then
+          otool -L "$KBIN"
+          LIBKRUN=$(otool -L "$KBIN" | grep -i libkrun | awk '{print $1}' | head -1)
+          if [ -n "$LIBKRUN" ]; then
+            echo ""
+            echo "--- libkrun-efi: $LIBKRUN ---"
+            otool -L "$LIBKRUN"
+            VIRGL=$(otool -L "$LIBKRUN" | grep -i virgl | awk '{print $1}' | head -1)
+            if [ -n "$VIRGL" ]; then
+              echo ""
+              echo "--- virglrenderer: $VIRGL ---"
+              otool -L "$VIRGL"
+            else
+              echo "WARNING: libkrun does NOT link virglrenderer"
+            fi
+          fi
+        fi
+
+        echo ""
+        echo "=== MoltenVK in nix store ==="
+        find /nix/store -maxdepth 3 -name "libMoltenVK*" 2>/dev/null | head -5 || echo "(none)"
+        find /nix/store -maxdepth 4 -name "MoltenVK_icd.json" 2>/dev/null | head -5 || echo "(none)"
+
+        echo ""
+        echo "=== libkrun GPU strings ==="
+        if [ -n "${LIBKRUN:-}" ]; then
+          strings "$LIBKRUN" 2>/dev/null | grep -iE "gpu|venus|virgl|metal|molten" | head -15 || true
+        fi
+
+        echo ""
+        echo "=== krunkit entitlements ==="
+        if [ -n "${KBIN:-}" ]; then
+          codesign -d --entitlements - "$KBIN" 2>&1 || echo "(not signed)"
+        fi
+
+        echo ""
+        echo "=== system GPU ==="
+        system_profiler SPDisplaysDataType 2>&1 || true
+
+        echo ""
+        echo "=== colima status ==="
+        colima status 2>&1 || echo "(not running)"
+        colima version 2>&1 || true
+
+        echo ""
+        echo "=== colima.yaml ==="
+        cat ~/.colima/default/colima.yaml 2>/dev/null || echo "(not found)"
+
+        echo ""
+        echo "=== lima.yml ==="
+        cat ~/.colima/default/lima.yml 2>/dev/null || cat ~/.colima/_lima/default/lima.yaml 2>/dev/null || echo "(not found)"
+
+        echo ""
+        echo "=== krunkit process ==="
+        ps aux | grep krunkit | grep -v grep || echo "(not running)"
+
+        echo ""
+        echo "=== lima stderr (last 100) ==="
+        # Lima logs live under _lima/colima/ (krunkit backend), not default/
+        tail -100 ~/.colima/_lima/colima/serial.log 2>/dev/null \
+          || tail -100 ~/.colima/_lima/colima/ha.stderr.log 2>/dev/null \
+          || tail -100 ~/.colima/default/ha.stderr.log 2>/dev/null \
+          || tail -100 ~/.colima/default/serial.log 2>/dev/null \
+          || echo "(not found at any known path)"
+
+        echo ""
+        echo "=== colima log (last 50) ==="
+        tail -50 ~/.colima/_lima/colima/colima.log 2>/dev/null \
+          || tail -50 ~/.colima/default/log/colima.log 2>/dev/null \
+          || echo "(not found)"
+
+        echo ""
+        echo "=== nix overlay ==="
+        cat "{{.ROOT_DIR}}/overlays/krunkit-balloon.patch" 2>/dev/null || echo "(not found)"
+
+        echo ""
+        echo "=== GUEST diagnostics ==="
+        # H1: cloud kernel missing CONFIG_DRM → no /dev/dri → llvmpipe fallback
+        # H2: blob alignment bug (krunkit #114) → resource_map_blob fails on 16K pages
+        # H3: guest mesa too old for Venus
+        if colima status 2>&1 | grep -qi running; then
+          echo "--- vm identity ---"
+          colima ssh -- cat /sys/class/dmi/id/product_name 2>/dev/null || true
+          colima ssh -- uname -a
+
+          # VM kernel: CONFIRMED OK (6.8.0-117-generic, CONFIG_DRM=y, virtio_gpu loaded, /dev/dri present)
+          echo "--- VM /dev/dri (summary) ---"
+          colima ssh -- ls -la /dev/dri/ 2>/dev/null || echo "/dev/dri does not exist"
+          colima ssh -- grep virtio_gpu /proc/modules 2>/dev/null || echo "(virtio_gpu not loaded)"
+
+          echo "--- VM dmesg gpu/drm ---"
+          colima ssh -- sudo dmesg 2>/dev/null | grep -iE "virgl|venus|virtio.gpu|drm|gpu|render" | tail -30 || echo "(none or no sudo)"
+
+          # --- CONTAINER-LEVEL diagnostics (the actual problem domain) ---
+          echo ""
+          echo "=== CONTAINER diagnostics ==="
+
+          echo "--- docker info: default runtime and security opts ---"
+          colima ssh -- docker info 2>/dev/null | grep -iE "runtime|security|cgroup|driver" | head -15 || echo "(docker info failed)"
+
+          echo "--- H4: does docker daemon expose /dev/dri by default? ---"
+          # Test: run a minimal container and check if /dev/dri is visible
+          colima ssh -- docker run --rm alpine ls -la /dev/dri/ 2>&1 || echo "(no /dev/dri in default container)"
+
+          echo "--- H4: with --device /dev/dri ---"
+          colima ssh -- docker run --rm --device /dev/dri alpine ls -la /dev/dri/ 2>&1 || echo "(failed even with --device)"
+
+          echo "--- H4: renderD128 accessible from container? ---"
+          colima ssh -- docker run --rm --device /dev/dri alpine dd if=/dev/dri/renderD128 bs=1 count=0 2>&1 || echo "(cannot open)"
+
+          echo "--- H5: devcell container env vars forcing software rendering ---"
+          # Check running containers for LIBGL_ALWAYS_SOFTWARE and GALLIUM_DRIVER
+          for CID in $(colima ssh -- docker ps -q 2>/dev/null); do
+            CNAME=$(colima ssh -- docker inspect --format '{{.Name}}' "$CID" 2>/dev/null)
+            echo "container $CNAME ($CID):"
+            colima ssh -- docker exec "$CID" env 2>/dev/null | grep -E "^(LIBGL|GALLIUM|VK_ICD|__EGL|MESA|DISPLAY)" || echo "  (none set)"
+            colima ssh -- docker exec "$CID" ls -la /dev/dri/ 2>/dev/null || echo "  (no /dev/dri)"
+          done
+
+          echo "--- H6: container mesa/Venus ICD ---"
+          # Check what mesa is in a running devcell container
+          for CID in $(colima ssh -- docker ps -q 2>/dev/null | head -3); do
+            CNAME=$(colima ssh -- docker inspect --format '{{.Name}}' "$CID" 2>/dev/null)
+            echo "container $CNAME ($CID):"
+            colima ssh -- docker exec "$CID" find /usr /nix -name "libvulkan_virtio*" 2>/dev/null | head -5 || true
+            colima ssh -- docker exec "$CID" find /usr /nix /etc -path "*/vulkan/*_icd*json" 2>/dev/null | head -5 || true
+            colima ssh -- docker exec "$CID" dpkg -l 'mesa*' 2>/dev/null | grep '^ii' | head -5 || true
+            colima ssh -- docker exec "$CID" es2_info 2>&1 | grep -i renderer || true
+            colima ssh -- docker exec "$CID" sh -c 'cat /etc/os-release 2>/dev/null | head -3' || true
+          done
+
+          echo "--- blob alignment: host page size (macOS) ---"
+          echo "host: $(getconf PAGESIZE 2>/dev/null || echo unknown)"
+          echo "guest: $(colima ssh -- getconf PAGESIZE 2>/dev/null || echo unknown)"
+        else
+          echo "(colima not running, skipping guest tests)"
+        fi
+
+        echo ""
+        echo "=== done ==="
+
+        } 2>&1 | tee "{{.LOG}}"

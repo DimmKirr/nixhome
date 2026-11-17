@@ -33,6 +33,7 @@ with pkgs; [
   # Stock edge QEMU (11.1.2+, binary cache)
   pkgsEdge.qemu
   lima
+  krunkit  # GPU-accelerated VM backend for colima; patched for balloon free-page reclaim (krunkit#121)
   monitorcontrol
   betterdisplay
 #  zoom-us # Disabled b/c of issues with permissions (doesn't recognize them, likely b/c of symlinks)
